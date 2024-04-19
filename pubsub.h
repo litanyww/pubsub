@@ -10,6 +10,8 @@
 #include <typeindex>
 #include <typeinfo>
 #include <map>
+#include <shared_mutex>
+#include <mutex>
 
 //
 #include <iostream>
@@ -95,7 +97,6 @@ namespace tbd
         /// @brief Elements with the same SelectType share the same set
         using GroupSelector = std::multiset<std::unique_ptr<ElementBase>, ElementBase::Compare>;
         
-
         class Linker
         {
             std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries_{};
@@ -113,7 +114,8 @@ namespace tbd
             }
         };
 
-        class Anchor{
+        class Anchor
+        {
             std::shared_ptr<Linker> linker_{};
         public:
             Anchor(std::shared_ptr<Linker> linker) : linker_{std::move(linker)} {}
@@ -195,62 +197,82 @@ namespace tbd
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
         using PerPrototype = std::map<std::type_index, GroupSelector>;
 
-        std::map<std::type_index, PerPrototype> data_;
+        class Data
+        {
+            std::map<std::type_index, PerPrototype> database_{};
+            std::shared_mutex lock_{};
+
+            using ScopedLock = std::scoped_lock<std::shared_mutex>;
+
+        public:
+            ScopedLock GetLock() { return ScopedLock{lock_}; }
+            void AddElement(ScopedLock&, std::shared_ptr<Linker>&) {}
+
+            template <class Func, class... Args, class... Rem>
+            void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, Element<Func, Args...>&& first, Rem... rem)
+            {
+                auto& perPrototype = database_[first.ArgumentType()];
+                auto& selectorSet = perPrototype[first.SelectArgs()];
+                auto base = first.MakeUnique();
+                base->SetLinker(linker);
+                auto it = selectorSet.insert(std::move(base));
+                linker->Remember(selectorSet, it);
+
+                AddElement(guard, linker, std::move(rem)...);
+            }
+
+            template <class Type>
+            std::deque<std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
+            {
+                std::deque<std::weak_ptr<ElementBase>> winners{};
+                std::shared_lock<std::shared_mutex> guard{lock_};
+                if (auto perPrototypeIt = database_.find(std::type_index{typeid(decltype(argTuple))}); perPrototypeIt != database_.end())
+                {
+                    PerPrototype& perPrototype = perPrototypeIt->second;
+                    std::deque<std::weak_ptr<ElementBase>> winners{};
+                    for (auto& [type, selectors] : perPrototype)
+                    {
+                        auto [first, last] = selectors.equal_range(argTuple);
+                        for (;first != last; ++first)
+                        {
+                            ElementBase* element = first->get();
+                            if (auto linker = element->GetLinker().lock())
+                            {
+                                winners.push_back(std::shared_ptr<ElementBase>{linker, element});
+                            }
+                        }
+
+                    }
+                }
+                return winners;
+            }
+
+        };
+        std::shared_ptr<Data> data_{std::make_shared<Data>()};
 
         template<class... Args>
         void Publish(Args&&... args)
         {
             ArgsToTuple<Args...> argTuple{std::forward<Args>(args)...};
             std::cerr << "published args: " << typeid(argTuple).name() << "\n";
-            if (auto perPrototypeIt = data_.find(std::type_index{typeid(decltype(argTuple))}); perPrototypeIt != data_.end())
-            {
-                std::deque<std::weak_ptr<ElementBase>> winners{};
-                PerPrototype& perPrototype = perPrototypeIt->second;
-                for (auto& [type, selectors] : perPrototype)
-                {
-                    auto [first, last] = selectors.equal_range(argTuple);
-                    for (;first != last; ++first)
-                    {
-                        ElementBase* element = first->get();
-                        if (auto linker = element->GetLinker().lock())
-                        {
-                            winners.push_back(std::shared_ptr<ElementBase>{linker, element});
-                        }
-                    }
 
-                }
-                // unlock
-                for (auto weak : winners)
+            // unlock
+            for (auto weak : data_->GetMatches(argTuple))
+            {
+                if (auto winner = weak.lock())
                 {
-                    if (auto winner = weak.lock())
-                    {
-                        winner->Execute(static_cast<const void*>(&argTuple));
-                    }
+                    winner->Execute(static_cast<const void*>(&argTuple));
                 }
             }
-        }
-
-        void AddElement(std::shared_ptr<Linker>&) {}
-
-        template <class Func, class... Args, class... Rem>
-        void AddElement(std::shared_ptr<Linker>& linker, Element<Func, Args...>&& first, Rem... rem)
-        {
-            auto& perPrototype = data_[first.ArgumentType()];
-            auto& selectorSet = perPrototype[first.SelectArgs()];
-            auto base = first.MakeUnique();
-            base->SetLinker(linker);
-            auto it = selectorSet.insert(std::move(base));
-            linker->Remember(selectorSet, it);
-
-            AddElement(linker, std::move(rem)...);
         }
 
         template <class Func, class... Args>
         [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
         {
             auto linker = std::make_shared<Linker>();
+            auto guard = data_->GetLock();
 
-            AddElement(linker, Element<Func, Args...>{std::move(func), std::forward<Args>(args)...});
+            data_->AddElement(guard, linker, Element<Func, Args...>{std::move(func), std::forward<Args>(args)...});
 
             return Anchor{std::move(linker)};
         }
@@ -259,8 +281,9 @@ namespace tbd
         [[nodiscard]] Anchor Subscribe(Element<Func, Args...> first, Elems... elements)
         {
             auto linker = std::make_shared<Linker>();
+            auto guard = data_->GetLock();
 
-            AddElement(linker, std::move(first), std::move(elements)...);
+            data_->AddElement(guard, linker, std::move(first), std::move(elements)...);
 
             return Anchor{std::move(linker)};
         }
