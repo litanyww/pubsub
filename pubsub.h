@@ -344,5 +344,5 @@ namespace tbd
         }
     };
     template <class Func, class... Args>
-    PubSub::Element<Func, Args...> Choose(Func&& func, Args&&... args) { return PubSub::Element<Func, Args...>{std::forward<Func>(func), std::forward<Args>(args)...}; }
+    PubSub::Element<Func, Args...> Select(Func&& func, Args&&... args) { return PubSub::Element<Func, Args...>{std::forward<Func>(func), std::forward<Args>(args)...}; }
 }
