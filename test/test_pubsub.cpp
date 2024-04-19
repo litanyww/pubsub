@@ -60,3 +60,41 @@ TEST(PubSub, TextParameter)
     std::vector<std::string> expected{"1:42,first", "2:42,second", "1:42,second"};
     ASSERT_EQ(expected, results);
 }
+
+TEST(PubSub, Recursion)
+{
+    tbd::PubSub pubsub{};
+
+    tbd::PubSub::Anchor subAnchor{};
+    ASSERT_FALSE(subAnchor);
+    std::vector<std::string> results{};
+    auto anchor = pubsub.Subscribe([&pubsub, &subAnchor, &results](int a)
+                                   { if (!subAnchor) {
+                                    subAnchor = pubsub.Subscribe([&subAnchor, &results](int b)
+                                                                  {
+                                                                        results.emplace_back("sub:" + std::to_string(b));
+                                                                        subAnchor = nullptr; },
+                                                                  69); } },
+                                   42);
+    ASSERT_TRUE(anchor);
+    pubsub.Publish(69);
+    ASSERT_TRUE(results.empty());
+    pubsub.Publish(42);
+    ASSERT_TRUE(results.empty());
+    ASSERT_TRUE(subAnchor);
+    pubsub.Publish(69);
+    std::vector<std::string> expected{"sub:69"};
+    ASSERT_EQ(expected, results);
+    results.clear();
+    pubsub.Publish(69);
+    ASSERT_TRUE(results.empty());
+    pubsub.Publish(42);
+    ASSERT_TRUE(results.empty());
+    pubsub.Publish(42);
+    ASSERT_TRUE(results.empty());
+    pubsub.Publish(69);
+    ASSERT_EQ(expected, results);
+    results.clear();
+    pubsub.Publish(69);
+    ASSERT_TRUE(results.empty());
+}

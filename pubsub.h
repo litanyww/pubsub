@@ -27,6 +27,12 @@ namespace tbd
         friend auto operator<=>(const Any_t &, const Other &other) { return other <=> other; }
         template <class Other>
         friend bool operator==(const Any_t &, const Other &other) { return true; }
+        template <class Stream, class = Stream::char_type>
+        friend Stream &operator<<(Stream &stream, const Any_t &)
+        {
+            stream << "any";
+            return stream;
+        }
     };
     constexpr static Any_t any;
 
@@ -173,6 +179,7 @@ namespace tbd
         {
             std::shared_ptr<Linker> linker_{};
         public:
+            Anchor() = default;
             Anchor(std::shared_ptr<Linker> linker) : linker_{std::move(linker)} {}
             ~Anchor() = default;
             Anchor& operator=(std::nullptr_t) { linker_ = nullptr; return *this; }
@@ -180,6 +187,7 @@ namespace tbd
             Anchor& operator=(Anchor&&) = default;
             Anchor(const Anchor&) = delete;
             Anchor& operator=(const Anchor&) = delete;
+            explicit operator bool() const { return static_cast<bool>(linker_); }
         };
 
         template <typename Signature>
@@ -209,8 +217,8 @@ namespace tbd
             static inline constexpr std::size_t CallArgCount = std::tuple_size<TupleType>();
             using SelectType = AddType<CallArgCount, Any_t, Args...>::Type;
 
+            SelectType sel_; // the select type is a common size, the func is not.
             Func func_;
-            SelectType sel_;
 
         public:
             explicit Element(Func func, Args... args) : func_{std::move(func)},
@@ -219,17 +227,17 @@ namespace tbd
             }
             bool LessThan(const void* candidate) const override
             {
-                auto rhs = reinterpret_cast<const TupleType*>(candidate);
+                auto rhs = static_cast<const TupleType*>(candidate);
                 return sel_ < *rhs;
             }
             bool GreaterThan(const void* candidate) const override
             {
-                auto rhs = reinterpret_cast<const TupleType*>(candidate);
+                auto rhs = static_cast<const TupleType*>(candidate);
                 return sel_ > *rhs;
             }
             bool LessThan(const ElementBase* candidate) const override
             {
-                auto rhs = reinterpret_cast<const Element*>(candidate);
+                auto rhs = static_cast<const Element*>(candidate);
                 return sel_ < rhs->sel_;
             }
             void *GetFunc() override { return static_cast<void *>(&func_); }
@@ -241,7 +249,8 @@ namespace tbd
             }
             std::unique_ptr<ElementBase> MakeUnique() override
             {
-                return std::make_unique<Element>(std::move(*this));
+                auto result = std::make_unique<Element>(std::move(*this));
+                return result;
             }
             std::type_index ReturnType() const override { return std::type_index{typeid(RetType)}; }
             std::type_index ArgumentType() const override{ return std::type_index{typeid(TupleType)}; }
