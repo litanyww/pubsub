@@ -12,6 +12,7 @@
 #include <map>
 #include <shared_mutex>
 #include <mutex>
+#include <thread>
 
 //
 #include <iostream>
@@ -68,7 +69,7 @@ namespace tbd
         {
             std::weak_ptr<Linker> linker_{};
         public:
-            void SetLinker(std::weak_ptr<Linker> linker) { linker_ = linker; }
+            void SetLinker(std::weak_ptr<Linker> linker) { linker_ = linker;}
             std::weak_ptr<Linker> GetLinker() { return linker_; }
             virtual ~ElementBase(){};
             virtual void *GetFunc() = 0;
@@ -100,6 +101,9 @@ namespace tbd
         class Linker
         {
             std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries_{};
+            std::mutex activeLock_{};
+            std::shared_mutex sharedLock_{};
+            std::set<std::thread::id> active_{};
         public:
             void Remember(GroupSelector& selectors, GroupSelector::iterator it)
             {
@@ -107,11 +111,62 @@ namespace tbd
             }
             ~Linker()
             {
+                {
+                    std::scoped_lock<std::mutex> activeGuard{activeLock_};
+                    if (auto it = active_.find(std::this_thread::get_id()); it != active_.end())
+                    {
+                        active_.erase(it);
+                        sharedLock_.unlock_shared();
+                    }
+                }
+                std::scoped_lock<std::shared_mutex> guard{sharedLock_};
+
                 for (auto[selector, it] : entries_)
                 {
                     selector->erase(it);
                 }
             }
+            std::pair<std::set<std::thread::id>::iterator, bool> Mark()
+            {
+                std::scoped_lock<std::mutex> activeGuard{activeLock_};
+                std::pair<std::set<std::thread::id>::iterator, bool> p = active_.emplace(std::this_thread::get_id());
+                if (p.second) {
+                    sharedLock_.lock_shared();
+                }
+                return p;
+            }
+
+            void Unmark(std::set<std::thread::id>::iterator it)
+            {
+                std::scoped_lock<std::mutex> activeGuard{activeLock_};
+                sharedLock_.unlock_shared();
+                active_.erase(it);
+            }
+
+            class Guard
+            {
+                Linker& linker_;
+                std::pair<std::set<std::thread::id>::iterator, bool> p_;
+            public:
+                Guard(Linker &linker) : linker_{linker}, p_{linker_.Mark()} {}
+
+                ~Guard()
+                {
+                    if (p_.second)
+                    {
+                        linker_.Unmark(p_.first);
+                    }
+                }
+            };
+            Guard Protect() { return Guard{*this}; }
+        };
+
+        class RunContext
+        {
+            ElementBase* element;
+            std::weak_ptr<Linker> linker; // for protecting the thread
+
+
         };
 
         class Anchor
@@ -161,7 +216,6 @@ namespace tbd
             explicit Element(Func func, Args... args) : func_{std::move(func)},
                                                         sel_{ExtendWithType<CallArgCount, Any_t, Args...>(std::move(args)...)}
             {
-                std::cerr << "Subscribed as: " << typeid(TupleType).name() << "\n";
             }
             bool LessThan(const void* candidate) const override
             {
@@ -214,9 +268,9 @@ namespace tbd
                 auto& perPrototype = database_[first.ArgumentType()];
                 auto& selectorSet = perPrototype[first.SelectArgs()];
                 auto base = first.MakeUnique();
-                base->SetLinker(linker);
                 auto it = selectorSet.insert(std::move(base));
                 linker->Remember(selectorSet, it);
+                (*it)->SetLinker(linker);
 
                 AddElement(guard, linker, std::move(rem)...);
             }
@@ -229,13 +283,13 @@ namespace tbd
                 if (auto perPrototypeIt = database_.find(std::type_index{typeid(decltype(argTuple))}); perPrototypeIt != database_.end())
                 {
                     PerPrototype& perPrototype = perPrototypeIt->second;
-                    std::deque<std::weak_ptr<ElementBase>> winners{};
                     for (auto& [type, selectors] : perPrototype)
                     {
                         auto [first, last] = selectors.equal_range(argTuple);
                         for (;first != last; ++first)
                         {
                             ElementBase* element = first->get();
+                            auto weak = element->GetLinker();
                             if (auto linker = element->GetLinker().lock())
                             {
                                 winners.push_back(std::shared_ptr<ElementBase>{linker, element});
@@ -254,13 +308,14 @@ namespace tbd
         void Publish(Args&&... args)
         {
             ArgsToTuple<Args...> argTuple{std::forward<Args>(args)...};
-            std::cerr << "published args: " << typeid(argTuple).name() << "\n";
 
             // unlock
             for (auto weak : data_->GetMatches(argTuple))
             {
                 if (auto winner = weak.lock())
                 {
+                    auto linker = winner->GetLinker().lock();
+                    auto guard = linker->Protect();
                     winner->Execute(static_cast<const void*>(&argTuple));
                 }
             }
