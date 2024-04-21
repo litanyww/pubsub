@@ -2,10 +2,18 @@
 
 #include <gtest/gtest.h>
 #include <typeindex>
+#include <latch>
 #include <iostream>
 #include <vector>
 #include <string>
+#include <future>
+#include <thread>
 
+namespace
+{
+    using namespace std::chrono_literals;
+    auto shortDelay = 10ms;
+}
 
 TEST(PubSub, BasicTest)
 {
@@ -97,4 +105,46 @@ TEST(PubSub, Recursion)
     results.clear();
     pubsub.Publish(69);
     ASSERT_TRUE(results.empty());
+}
+
+TEST(PubSub, AnchorSync)
+{
+    std::latch started{2U};
+    std::latch release{1U};
+    std::latch release2{1U};
+    tbd::PubSub pubsub{};
+    std::promise<void> p{};
+    auto f = p.get_future();
+    auto anchor = pubsub.Subscribe(tbd::Select([&started, &release](int)
+                                          {
+        started.count_down();
+        release.wait(); }, 42),
+                                   tbd::Select([&started, &release2](int)
+                                          {
+        started.count_down();
+        release2.wait(); }, 43));
+
+    std::thread thr1{[&pubsub]{
+        pubsub.Publish(42); // blocks on callback
+    }};
+    std::thread thr2{[&pubsub]{
+        pubsub.Publish(43); // blocks on callback
+    }};
+    std::thread thr3{[&anchor, &started, &p]{
+        started.wait();
+        anchor = nullptr; // will wait because callback is active
+        p.set_value();
+    }};
+
+    ASSERT_EQ(std::future_status::timeout, f.wait_for(shortDelay));
+    release.count_down(); // callback may exit
+    ASSERT_EQ(std::future_status::timeout, f.wait_for(shortDelay));
+    release2.count_down(); // callback may exit
+    ASSERT_EQ(std::future_status::ready, f.wait_for(shortDelay));
+
+    f.get();
+
+    thr1.join();
+    thr2.join();
+    thr3.join();
 }

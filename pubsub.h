@@ -115,8 +115,10 @@ namespace tbd
             {
                 entries_.emplace_back(&selectors, it);
             }
-            ~Linker()
+            ~Linker() { Destroy(); }
+            void Destroy()
             {
+                auto entries = std::move(entries_);
                 {
                     std::scoped_lock<std::mutex> activeGuard{activeLock_};
                     if (auto it = active_.find(std::this_thread::get_id()); it != active_.end())
@@ -127,44 +129,51 @@ namespace tbd
                 }
                 std::scoped_lock<std::shared_mutex> guard{sharedLock_};
 
-                for (auto[selector, it] : entries_)
+                for (auto[selector, it] : entries)
                 {
                     selector->erase(it);
                 }
             }
-            std::pair<std::set<std::thread::id>::iterator, bool> Mark()
+            bool Mark()
             {
                 std::scoped_lock<std::mutex> activeGuard{activeLock_};
                 std::pair<std::set<std::thread::id>::iterator, bool> p = active_.emplace(std::this_thread::get_id());
-                if (p.second) {
-                    sharedLock_.lock_shared();
+                if (!p.second)
+                {
+                    return false;
                 }
-                return p;
+                sharedLock_.lock_shared();
+                return true;
             }
 
-            void Unmark(std::set<std::thread::id>::iterator it)
+            void Unmark()
             {
                 std::scoped_lock<std::mutex> activeGuard{activeLock_};
-                sharedLock_.unlock_shared();
-                active_.erase(it);
+                if (active_.erase(std::this_thread::get_id()) > 0)
+                {
+                    sharedLock_.unlock_shared();
+                }
             }
 
             class Guard
             {
-                Linker& linker_;
-                std::pair<std::set<std::thread::id>::iterator, bool> p_;
+                std::weak_ptr<Linker> linker_{};
+                bool claimed_{};
             public:
-                Guard(Linker &linker) : linker_{linker}, p_{linker_.Mark()} {}
+                Guard(std::shared_ptr<Linker> linker) : linker_{linker}, claimed_{linker->Mark()} {}
 
                 ~Guard()
                 {
-                    if (p_.second)
+                    if (claimed_)
                     {
-                        linker_.Unmark(p_.first);
+                        if (auto linker = linker_.lock())
+                        {
+                            linker->Unmark();
+                        }
                     }
                 }
             };
-            Guard Protect() { return Guard{*this}; }
+            static Guard Protect(std::shared_ptr<Linker> linker) { return Guard{std::move(linker)}; }
         };
 
         class RunContext
@@ -181,8 +190,18 @@ namespace tbd
         public:
             Anchor() = default;
             Anchor(std::shared_ptr<Linker> linker) : linker_{std::move(linker)} {}
-            ~Anchor() = default;
-            Anchor& operator=(std::nullptr_t) { linker_ = nullptr; return *this; }
+            ~Anchor()
+            {
+                if (auto linker = std::move(linker_))
+                {
+                    linker->Destroy();
+                }
+            }
+            Anchor &operator=(std::nullptr_t)
+            {
+                auto tmp = std::move(*this);
+                return *this;
+            }
             Anchor(Anchor&&) = default;
             Anchor& operator=(Anchor&&) = default;
             Anchor(const Anchor&) = delete;
@@ -323,9 +342,11 @@ namespace tbd
             {
                 if (auto winner = weak.lock())
                 {
-                    auto linker = winner->GetLinker().lock();
-                    auto guard = linker->Protect();
-                    winner->Execute(static_cast<const void*>(&argTuple));
+                    if (auto linker = winner->GetLinker().lock())
+                    {
+                        auto guard = linker->Protect(linker);
+                        winner->Execute(static_cast<const void*>(&argTuple));
+                    }
                 }
             }
         }
