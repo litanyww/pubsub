@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <future>
+#include <deque>
 #include <thread>
 
 namespace
@@ -21,17 +22,17 @@ TEST(PubSub, BasicTest)
     PubSub pubsub{};
     auto func = [](int, const char *, long, long) {};
     const char *text = "abc";
-    PubSub::Element foo{func, 1, text};
+    PubSub::Element foo{[](int, const char *, long, long) {}, 1, text};
     ASSERT_EQ(typeid(void), foo.ReturnType());
     ASSERT_EQ(typeid(std::tuple<const int &, const char *const &, long const &, long const &>), foo.ArgumentType());
-    ASSERT_EQ(typeid(std::tuple<int, const char *, Any_t, Any_t>), foo.SelectArgs());
+    ASSERT_EQ(typeid(std::tuple<const int, const char *const, Any_t, Any_t>), foo.SelectArgs());
 
     std::vector<std::string> results{};
     auto sub1 = pubsub.Subscribe([&results](int v)
                                  { results.emplace_back("sub1:" + std::to_string(v)); }, 42);
-    auto sub2 = pubsub.Subscribe(tbd::PubSub::Element{[&results](int v)
+    auto sub2 = pubsub.SubscribeM(tbd::PubSub::Element{[&results](int v)
                                                       { results.emplace_back("sub2:" + std::to_string(v)); }, 42});
-    auto sub3 = pubsub.Subscribe(Select([&results](int v)
+    auto sub3 = pubsub.SubscribeM(Select([&results](int v)
                                         { results.emplace_back("sub3:" + std::to_string(v)); }, 42));
 
     auto sub4 = pubsub.Subscribe([&results](int a, int b)
@@ -115,7 +116,7 @@ TEST(PubSub, AnchorSync)
     tbd::PubSub pubsub{};
     std::promise<void> p{};
     auto f = p.get_future();
-    auto anchor = pubsub.Subscribe(tbd::Select([&started, &release](int)
+    auto anchor = pubsub.SubscribeM(tbd::Select([&started, &release](int)
                                           {
         started.count_down();
         release.wait(); }, 42),
@@ -147,4 +148,27 @@ TEST(PubSub, AnchorSync)
     thr1.join();
     thr2.join();
     thr3.join();
+}
+
+TEST(PubSub, Precision)
+{
+    unsigned int triggerValue{};
+    unsigned int triggerCount{};
+
+    tbd::PubSub pubsub{};
+    std::deque<tbd::PubSub::Anchor> anchors{};
+
+    for (unsigned int i = 0U; i < 5U; ++i)
+    {
+        anchors.emplace_back(pubsub.Subscribe([i,&triggerValue, &triggerCount] (unsigned int value) {
+            if (i == value) {
+                triggerValue = value;
+                ++triggerCount;
+            }
+        }, i));
+    }
+
+    pubsub.Publish(2U);
+    ASSERT_EQ(2U, triggerValue);
+    ASSERT_EQ(1U, triggerCount);
 }
