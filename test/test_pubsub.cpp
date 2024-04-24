@@ -158,7 +158,7 @@ TEST(PubSub, Precision)
     tbd::PubSub pubsub{};
     std::deque<tbd::PubSub::Anchor> anchors{};
 
-    for (unsigned int i = 0U; i < 5U; ++i)
+    for (unsigned int i = 0U; i < 50U; ++i)
     {
         anchors.emplace_back(pubsub.Subscribe([i,&triggerValue, &triggerCount] (unsigned int value) {
             if (i == value) {
@@ -168,7 +168,7 @@ TEST(PubSub, Precision)
         }, i));
     }
 
-    pubsub.Publish(2U);
-    ASSERT_EQ(2U, triggerValue);
+    pubsub.Publish(42U);
+    ASSERT_EQ(42U, triggerValue);
     ASSERT_EQ(1U, triggerCount);
 }
