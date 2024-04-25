@@ -258,7 +258,7 @@ namespace tbd
         };
 
         template <class Func, class SelectType>
-        class Element : public ElementBase
+        class Select : public ElementBase
         {
             using TupleType = GetTuple<Func>;
             static inline constexpr std::size_t CallArgCount = std::tuple_size<TupleType>();
@@ -279,7 +279,7 @@ namespace tbd
             }
             bool LessThan(const ElementBase* candidate) const override
             {
-                auto rhs = static_cast<const Element*>(candidate);
+                auto rhs = static_cast<const Select*>(candidate);
                 return sel_ < rhs->sel_;
             }
             void *GetFunc() override { return static_cast<void *>(&func_); }
@@ -291,7 +291,7 @@ namespace tbd
             }
             std::unique_ptr<ElementBase> MakeUnique() override
             {
-                auto result = std::make_unique<Element>(std::move(*this));
+                auto result = std::make_unique<Select>(std::move(*this));
                 return result;
             }
             std::type_index ReturnType() const override { return std::type_index{typeid(GetRet<Func>)}; }
@@ -299,19 +299,18 @@ namespace tbd
             std::type_index SelectArgs() const override{ return std::type_index{typeid(SelectType)}; }
 
             template <class Lambda, class... Args>
-            explicit Element(Lambda&& func, Args&&... args) :
+            explicit Select(Lambda&& func, Args&&... args) :
                 sel_{
                     Extend<Any_t,
                     GetTuple<Lambda>,
-                    std::tuple<Args...>
+                    std::tuple<std::decay_t<Args>...>
                     >({std::forward<Args>(args)...})},
                 func_{std::move(func)}
             {
             }
-
         };
         template <class Lambda, class... Args>
-        Element(Lambda f, Args&&... a) -> Element<Lambda,
+        Select(Lambda f, Args&&... a) -> Select<Lambda,
         decltype(
             Extend<Any_t,
                 GetTuple<Lambda>,
@@ -334,7 +333,7 @@ namespace tbd
             void AddElement(ScopedLock&, std::shared_ptr<Linker>&) {}
 
             template <class Func, class... Args, class... Rem>
-            void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, Element<Func, Args...>&& first, Rem... rem)
+            void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, Select<Func, Args...>&& first, Rem... rem)
             {
                 auto& perPrototype = database_[first.ArgumentType()];
                 auto& selectorSet = perPrototype[first.SelectArgs()];
@@ -401,24 +400,27 @@ namespace tbd
             auto guard = data_->GetLock();
 
             data_->AddElement(guard, linker,
-            Element{
+            Select{
                 std::move(func),
                 std::forward<Args>(args)...});
 
             return Anchor{std::move(linker)};
         }
 
-        template <class... Elems>
-        [[nodiscard]] Anchor SubscribeM(Elems&&... elements)
+        template <class Func, class... Args, class... Elems>
+        [[nodiscard]] Anchor Subscribe(Select<Func, Args...>&& element, Elems&&... remainder)
         {
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
 
-            data_->AddElement(guard, linker, std::forward<Elems>(elements)...);
+            data_->AddElement(guard, linker, std::move(element), std::forward<Elems>(remainder)...);
 
             return Anchor{std::move(linker)};
         }
     };
-    template <class Func, class... Args>
-    auto Select(Func&& func, Args&&... args) { return PubSub::Element{std::forward<Func>(func), std::forward<Args>(args)...}; }
+    template <class Lambda, class... Args>
+    auto Select(Lambda &&func, Args &&...args) { return PubSub::Select<Lambda, decltype(Extend<Any_t,
+                                                                                               GetTuple<Lambda>,
+                                                                                               std::tuple<const std::decay_t<Args>...>>({}))>{std::forward<Lambda>(func), std::forward<Args>(args)...}; }
+
 }
