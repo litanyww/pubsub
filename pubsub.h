@@ -364,19 +364,14 @@ namespace tbd
 
         public:
             ScopedLock GetLock() { return ScopedLock{lock_}; }
-            void AddElement(ScopedLock&, std::shared_ptr<Linker>&) {}
 
-            template <typename Func, typename... Args, typename... Rem>
-            void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, Select<Func, Args...>&& first, Rem... rem)
+            void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
             {
-                auto& perPrototype = database_[first.ArgumentType()];
-                auto& selectorSet = perPrototype[first.SelectArgs()];
-                auto base = first.MakeUnique();
+                auto& perPrototype = database_[base->ArgumentType()];
+                auto& selectorSet = perPrototype[base->SelectArgs()];
                 auto it = selectorSet.insert(std::move(base));
                 linker->Remember(selectorSet, it);
                 (*it)->SetLinker(linker);
-
-                AddElement(guard, linker, std::move(rem)...);
             }
 
             template <typename Type>
@@ -433,10 +428,13 @@ namespace tbd
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
 
-            data_->AddElement(guard, linker,
-            Select{
+            auto sel = std::make_unique<Select<Func, decltype(Extend<Any_t,
+                                                                     GetTuple_t<Func>,
+                                                                     std::tuple<const std::decay_t<Args>...>>({}))>>(
                 std::move(func),
-                std::forward<Args>(args)...});
+                std::forward<Args>(args)...);
+
+            data_->AddElement(guard, linker, std::move(sel));
 
             return Anchor{std::move(linker)};
         }
@@ -446,8 +444,9 @@ namespace tbd
         {
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
-
-            data_->AddElement(guard, linker, std::move(element), std::forward<Elems>(remainder)...);
+            data_->AddElement(guard, linker, element.MakeUnique());
+            (static_cast<void>(
+                data_->AddElement(guard, linker, remainder.MakeUnique())) , ...);
 
             return Anchor{std::move(linker)};
         }
