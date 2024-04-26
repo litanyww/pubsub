@@ -418,9 +418,123 @@ namespace tbd
             return Anchor{std::move(linker)};
         }
     };
+
     template <class Lambda, class... Args>
-    auto Select(Lambda &&func, Args &&...args) { return PubSub::Select<Lambda, decltype(Extend<Any_t,
-                                                                                               GetTuple<Lambda>,
-                                                                                               std::tuple<const std::decay_t<Args>...>>({}))>{std::forward<Lambda>(func), std::forward<Args>(args)...}; }
+    auto Select(Lambda &&func, Args &&...args)
+    {
+        return PubSub::Select<Lambda,
+                              decltype(Extend<Any_t,
+                                              GetTuple<Lambda>, std::tuple<const std::decay_t<Args>...>>({}))>{
+            std::forward<Lambda>(func), std::forward<Args>(args)...};
+    }
+
+    template <class Type>
+    class LE
+    {
+        Type value_{};
+    public:
+        explicit LE(Type value) : value_{std::move(value)} {}
+        ~LE() = default;
+        LE() = default;
+        LE(LE&&) = default;
+        LE& operator=(LE&&) = default;
+        LE(const LE&) = default;
+        LE& operator=(const LE&) = default;
+
+        friend bool operator<(const LE& lhs, const LE& rhs) { return lhs.value_ < rhs.value_; }
+        friend bool operator<(const LE& lhs, const Type& rhs) { return lhs.value_ < rhs; }
+        friend bool operator<(const Type&, const LE&) { return false; }
+
+        template <class Stream, class = Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const LE& g)
+        {
+            stream << "LE<" << typeid(Type).name() << ">{" << g.value_ << "}";
+            return stream;
+        }
+    };
+
+    template<class Type>
+    LE(Type&&) -> LE<Type>;
+
+    template <class Type>
+    class LT
+    {
+        Type value_{};
+    public:
+        explicit LT(Type value) : value_{std::move(value)} {}
+        ~LT() = default;
+        LT() = default;
+        LT(LT&&) = default;
+        LT& operator=(LT&&) = default;
+        LT(const LT&) = default;
+        LT& operator=(const LT&) = default;
+
+        friend bool operator<(const LT& lhs, const LT& rhs) { return lhs.value_ < rhs.value_; }
+        friend bool operator<(const LT& lhs, const Type& rhs) { return lhs.value_ <= rhs; }
+        friend bool operator<(const Type&, const LT&) { return false; }
+
+        template <class Stream, class = Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const LT& g)
+        {
+            stream << "LT<" << typeid(Type).name() << ">{" << g.value_ << "}";
+            return stream;
+        }
+    };
+
+    template<class Type>
+    LT(Type&&) -> LT<Type>;
+
+    template <class Type>
+    class GE
+    {
+        Type value_{};
+    public:
+        explicit GE(Type value) : value_{std::move(value)} {}
+        GE() = default;
+        ~GE() = default;
+        GE(GE&&) = default;
+        GE& operator=(GE&&) = default;
+        GE(const GE&) = default;
+        GE& operator=(const GE&) = default;
+
+        friend bool operator<(const GE& lhs, const GE& rhs) { return lhs.value_ < rhs.value_; }
+        friend bool operator<(const GE&, const Type&) { return false; }
+        friend bool operator<(const Type& lhs, const GE& rhs) { return lhs < rhs.value_; }
+
+        template <class Stream, class = Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const GE& g)
+        {
+            stream << "GE<" << typeid(Type).name() << ">{" << g.value_ << "}";
+            return stream;
+        }
+    };
+    template<class Type>
+    GE(Type&&) -> GE<Type>;
+
+    template <class Type>
+    class GT
+    {
+        Type value_{};
+    public:
+        explicit GT(Type value) : value_{std::move(value)} {}
+        GT() = default;
+        ~GT() = default;
+        GT(GT&&) = default;
+        GT& operator=(GT&&) = default;
+        GT(const GT&) = default;
+        GT& operator=(const GT&) = default;
+
+        friend bool operator<(const GT& lhs, const GT& rhs) { return lhs.value_ < rhs.value_; }
+        friend bool operator<(const GT&, const Type&) { return false; }
+        friend bool operator<(const Type& lhs, const GT& rhs) { return lhs <= rhs.value_; }
+        template <class Stream, class = Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const GT& g)
+        {
+            stream << "GT<" << typeid(Type).name() << ">{" << g.value_ << "}";
+            return stream;
+        }
+    };
+    template<class Type>
+    GT(Type&&) -> GT<Type>;
 
 }

@@ -1,6 +1,7 @@
 #include "pubsub.h"
 
 #include <gtest/gtest.h>
+#include <chrono>
 #include <typeindex>
 #include <latch>
 #include <iostream>
@@ -14,6 +15,40 @@ namespace
 {
     using namespace std::chrono_literals;
     auto shortDelay = 10ms;
+
+    struct TCompare
+    {
+        using is_transparent = void;
+
+        template <class L, class R>
+        bool operator()(const L &lhs, const R &rhs) const
+        {
+            bool result = lhs < rhs;
+            // std::cerr << " " << lhs << " < " << rhs << " = " << std::boolalpha << result << "\n";
+            return result;
+        }
+    };
+    template <class T>
+    bool show(std::pair<int, int> p, int trigger, int expectedFirst, int expectedLast)
+    {
+        std::map<T, int, TCompare> values{};
+        for (int i = p.first; i <= p.second; ++i)
+        {
+            values.emplace(i, i);
+        }
+        auto [first, last] = values.equal_range(trigger);
+        if (first->second != expectedFirst)
+        {
+            std::cerr << "first expected as " << expectedFirst << ", actual " << first->second << "\n";
+            return false;
+        }
+        if ((--last)->second != expectedLast)
+        {
+            std::cerr << "second expected as " << expectedLast << ", actual " << last->second << "\n";
+            return false;
+        }
+        return true;
+    };
 }
 
 TEST(PubSub, BasicTest)
@@ -171,4 +206,42 @@ TEST(PubSub, Precision)
     pubsub.Publish(42U);
     ASSERT_EQ(42U, triggerValue);
     ASSERT_EQ(1U, triggerCount);
+}
+
+TEST(PubSub, ComparisonModifiers)
+{
+    ASSERT_TRUE(show<tbd::GE<int>>({9, 99}, 11, 9, 11));
+    ASSERT_TRUE(show<tbd::GT<int>>({9, 13}, 11, 9, 10));
+    ASSERT_TRUE(show<tbd::LE<int>>({9, 13}, 11, 11, 13));
+    ASSERT_TRUE(show<tbd::LT<int>>({9, 13}, 11, 12, 13));
+}
+
+TEST(PubSub, ExpireOnTime)
+{
+    // One anchor may reference multiple subscriptions, and if one of them is
+    // tracking time, then we have an easy way of expiring an event after a
+    // pre-determined time period, assuming we have a timer thread feeding
+    // period time events.
+    using namespace std::chrono_literals;
+    tbd::PubSub pubsub{};
+    int latest{};
+
+    tbd::PubSub::Anchor anchor;
+    auto now = std::chrono::steady_clock::now();
+
+    anchor = pubsub.Subscribe(tbd::Select([&anchor](std::chrono::steady_clock::time_point)
+                                          { anchor = nullptr; }, tbd::GE(now + 10s)),
+                              tbd::Select([&latest](int v)
+                                          { latest = v; }));
+    pubsub.Publish(1);
+    ASSERT_EQ(1, latest);
+    pubsub.Publish(now);
+    pubsub.Publish(2);
+    ASSERT_EQ(2, latest);
+    pubsub.Publish(now + 9s);
+    pubsub.Publish(3);
+    ASSERT_EQ(3, latest);
+    pubsub.Publish(now + 10s);
+    pubsub.Publish(4);
+    ASSERT_EQ(3, latest);
 }
