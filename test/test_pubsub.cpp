@@ -20,7 +20,7 @@ namespace
     {
         using is_transparent = void;
 
-        template <class L, class R>
+        template <typename L, typename R>
         bool operator()(const L &lhs, const R &rhs) const
         {
             bool result = lhs < rhs;
@@ -28,7 +28,7 @@ namespace
             return result;
         }
     };
-    template <class T>
+    template <typename T>
     bool show(std::pair<int, int> p, int trigger, int expectedFirst, int expectedLast)
     {
         std::map<T, int, TCompare> values{};

@@ -24,13 +24,13 @@ namespace tbd
     public:
         friend constexpr auto operator<=>(const Any_t&, const Any_t&) = default;
 
-        template <class Other>
+        template <typename Other>
         friend constexpr auto operator<=>(const Any_t &, const Other &other) { return other <=> other; }
 
-        template <class Other>
+        template <typename Other>
         friend constexpr bool operator==(const Any_t &, const Other &other) { return true; }
 
-        template <class Stream, class = Stream::char_type>
+        template <typename Stream, typename = Stream::char_type>
         friend Stream &operator<<(Stream &stream, const Any_t &)
         {
             stream << "any";
@@ -39,10 +39,10 @@ namespace tbd
     };
     constexpr static Any_t any;
 
-    template <class... Args>
+    template <typename... Args>
     using ArgsToTuple = std::tuple<const std::remove_const_t<std::decay_t<Args>> &...>;
 
-    template <class NewType, class PA, class TA>
+    template <typename NewType, typename PA, typename TA>
     constexpr auto Extend(TA&& b)
     {
         if constexpr (std::tuple_size<TA>() < std::tuple_size<PA>())
@@ -55,34 +55,34 @@ namespace tbd
         }
     }
   
-    template <class NewType, class TP, class TA>
+    template <typename NewType, typename TP, typename TA>
     using ExtendedTupleType = decltype(Extend<NewType, TA, TP>({}, {}));
 
     template <typename Signature>
     class MemberDecode;
 
-    template <class Res, class Class, class... ArgTypes>
+    template <typename Res, typename Class, typename... ArgTypes>
     class MemberDecode<Res (Class::*)(ArgTypes...) const>
     {
     public:
         using RetType = Res;
         using TupleType = ArgsToTuple<ArgTypes...>;
     };
-    template <class Res, class Class, class... ArgTypes>
+    template <typename Res, typename Class, typename... ArgTypes>
     class MemberDecode<Res (Class::*)(ArgTypes...)>
     {
     public:
         using RetType = Res;
         using TupleType = ArgsToTuple<ArgTypes...>;
     };
-    template <class Lambda>
+    template <typename Lambda>
     using GetRet = typename MemberDecode<decltype(&Lambda::operator())>::RetType;
 
-    template <class Lambda>
+    template <typename Lambda>
     using GetTuple = typename MemberDecode<decltype(&Lambda::operator())>::TupleType;
 
 
-    template <size_t count, class NewType, class... Args>
+    template <size_t count, typename NewType, typename... Args>
     constexpr auto AddTypeFunc(Args... args)
     {
         if (sizeof...(Args) < count) {
@@ -94,13 +94,13 @@ namespace tbd
         }
     }
 
-    template <class Lambda, class NewType, class... Args>
+    template <typename Lambda, typename NewType, typename... Args>
     struct AddType
     {
         using Type = decltype(AddTypeFunc<std::tuple_size<GetTuple<Lambda>>(), NewType, Args...>(std::declval<Args>()...));
     };
 
-    template <class Lambda, class NewType, class... Args>
+    template <typename Lambda, typename NewType, typename... Args>
     constexpr auto ExtendWithType(Args&&... args)
     {
         constexpr auto count = std::tuple_size<GetTuple<Lambda>>();
@@ -142,9 +142,9 @@ namespace tbd
             public:
                 using is_transparent = void;
                 bool operator()(const std::unique_ptr<ElementBase>& lhs, const std::unique_ptr<ElementBase>& rhs) const { return lhs->LessThan(rhs.get()); }
-                template <class... Args>
+                template <typename... Args>
                 bool operator()(const std::unique_ptr<ElementBase>& lhs, const std::tuple<Args...>& rhs) const { return lhs->LessThan(static_cast<const void*>(&rhs)); }
-                template <class... Args>
+                template <typename... Args>
                 bool operator()(const std::tuple<Args...>& lhs, const std::unique_ptr<ElementBase>& rhs) const { return rhs->GreaterThan(static_cast<const void*>(&lhs)); }
             };
         };
@@ -257,7 +257,7 @@ namespace tbd
             explicit operator bool() const { return static_cast<bool>(linker_); }
         };
 
-        template <class Func, class SelectType>
+        template <typename Func, typename SelectType>
         class Select : public ElementBase
         {
             using TupleType = GetTuple<Func>;
@@ -298,7 +298,7 @@ namespace tbd
             std::type_index ArgumentType() const override{ return std::type_index{typeid(TupleType)}; }
             std::type_index SelectArgs() const override{ return std::type_index{typeid(SelectType)}; }
 
-            template <class Lambda, class... Args>
+            template <typename Lambda, typename... Args>
             explicit Select(Lambda&& func, Args&&... args) :
                 sel_{
                     Extend<Any_t,
@@ -309,7 +309,7 @@ namespace tbd
             {
             }
         };
-        template <class Lambda, class... Args>
+        template <typename Lambda, typename... Args>
         Select(Lambda f, Args&&... a) -> Select<Lambda,
         decltype(
             Extend<Any_t,
@@ -332,7 +332,7 @@ namespace tbd
             ScopedLock GetLock() { return ScopedLock{lock_}; }
             void AddElement(ScopedLock&, std::shared_ptr<Linker>&) {}
 
-            template <class Func, class... Args, class... Rem>
+            template <typename Func, typename... Args, typename... Rem>
             void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, Select<Func, Args...>&& first, Rem... rem)
             {
                 auto& perPrototype = database_[first.ArgumentType()];
@@ -345,7 +345,7 @@ namespace tbd
                 AddElement(guard, linker, std::move(rem)...);
             }
 
-            template <class Type>
+            template <typename Type>
             std::deque<std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
             {
                 std::deque<std::weak_ptr<ElementBase>> winners{};
@@ -374,7 +374,7 @@ namespace tbd
         };
         std::shared_ptr<Data> data_{std::make_shared<Data>()};
 
-        template<class... Args>
+        template<typename... Args>
         void Publish(Args&&... args)
         {
             ArgsToTuple<Args...> argTuple{std::forward<Args>(args)...};
@@ -393,7 +393,7 @@ namespace tbd
             }
         }
 
-        template <class Func, class... Args>
+        template <typename Func, typename... Args>
         [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
         {
             auto linker = std::make_shared<Linker>();
@@ -407,7 +407,7 @@ namespace tbd
             return Anchor{std::move(linker)};
         }
 
-        template <class Func, class... Args, class... Elems>
+        template <typename Func, typename... Args, typename... Elems>
         [[nodiscard]] Anchor Subscribe(Select<Func, Args...>&& element, Elems&&... remainder)
         {
             auto linker = std::make_shared<Linker>();
@@ -419,7 +419,7 @@ namespace tbd
         }
     };
 
-    template <class Lambda, class... Args>
+    template <typename Lambda, typename... Args>
     auto Select(Lambda &&func, Args &&...args)
     {
         return PubSub::Select<Lambda,
@@ -428,7 +428,7 @@ namespace tbd
             std::forward<Lambda>(func), std::forward<Args>(args)...};
     }
 
-    template <class Type>
+    template <typename Type>
     class LE
     {
         Type value_{};
@@ -445,7 +445,7 @@ namespace tbd
         friend bool operator<(const LE& lhs, const Type& rhs) { return lhs.value_ < rhs; }
         friend bool operator<(const Type&, const LE&) { return false; }
 
-        template <class Stream, class = Stream::char_type>
+        template <typename Stream, typename = Stream::char_type>
         friend Stream& operator<<(Stream& stream, const LE& g)
         {
             stream << "LE<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -453,10 +453,10 @@ namespace tbd
         }
     };
 
-    template<class Type>
+    template<typename Type>
     LE(Type&&) -> LE<Type>;
 
-    template <class Type>
+    template <typename Type>
     class LT
     {
         Type value_{};
@@ -473,7 +473,7 @@ namespace tbd
         friend bool operator<(const LT& lhs, const Type& rhs) { return lhs.value_ <= rhs; }
         friend bool operator<(const Type&, const LT&) { return false; }
 
-        template <class Stream, class = Stream::char_type>
+        template <typename Stream, typename = Stream::char_type>
         friend Stream& operator<<(Stream& stream, const LT& g)
         {
             stream << "LT<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -481,10 +481,10 @@ namespace tbd
         }
     };
 
-    template<class Type>
+    template<typename Type>
     LT(Type&&) -> LT<Type>;
 
-    template <class Type>
+    template <typename Type>
     class GE
     {
         Type value_{};
@@ -501,17 +501,17 @@ namespace tbd
         friend bool operator<(const GE&, const Type&) { return false; }
         friend bool operator<(const Type& lhs, const GE& rhs) { return lhs < rhs.value_; }
 
-        template <class Stream, class = Stream::char_type>
+        template <typename Stream, typename = Stream::char_type>
         friend Stream& operator<<(Stream& stream, const GE& g)
         {
             stream << "GE<" << typeid(Type).name() << ">{" << g.value_ << "}";
             return stream;
         }
     };
-    template<class Type>
+    template<typename Type>
     GE(Type&&) -> GE<Type>;
 
-    template <class Type>
+    template <typename Type>
     class GT
     {
         Type value_{};
@@ -527,14 +527,14 @@ namespace tbd
         friend bool operator<(const GT& lhs, const GT& rhs) { return lhs.value_ < rhs.value_; }
         friend bool operator<(const GT&, const Type&) { return false; }
         friend bool operator<(const Type& lhs, const GT& rhs) { return lhs <= rhs.value_; }
-        template <class Stream, class = Stream::char_type>
+        template <typename Stream, typename = Stream::char_type>
         friend Stream& operator<<(Stream& stream, const GT& g)
         {
             stream << "GT<" << typeid(Type).name() << ">{" << g.value_ << "}";
             return stream;
         }
     };
-    template<class Type>
+    template<typename Type>
     GT(Type&&) -> GT<Type>;
 
 }
