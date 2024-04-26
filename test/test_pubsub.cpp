@@ -58,7 +58,6 @@ TEST(PubSub, BasicTest)
     auto func = [](int, const char *, long, long) {};
     const char *text = "abc";
     PubSub::Select foo{[](int, const char *, long, long) {}, 1, text};
-    ASSERT_EQ(typeid(void), foo.ReturnType());
     ASSERT_EQ(typeid(std::tuple<const int &, const char *const &, long const &, long const &>), foo.ArgumentType());
     ASSERT_EQ(typeid(std::tuple<const int, const char *const, Any_t, Any_t>), foo.SelectArgs());
 
@@ -244,4 +243,20 @@ TEST(PubSub, ExpireOnTime)
     pubsub.Publish(now + 10s);
     pubsub.Publish(4);
     ASSERT_EQ(3, latest);
+}
+
+int latestNotALambdaArgument{};
+void NotALambda(int, int i)
+{
+    latestNotALambdaArgument = i;
+}
+
+TEST(PubSub, FunctionPointer)
+{
+    // we want this to work with function pointers, not just lambdas
+    tbd::PubSub pubsub;
+
+    auto anchor = pubsub.Subscribe(NotALambda, 42);
+    pubsub.Publish(42, 123);
+    ASSERT_EQ(123, latestNotALambdaArgument);
 }

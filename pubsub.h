@@ -13,6 +13,29 @@
 #include <shared_mutex>
 #include <mutex>
 #include <thread>
+#include <cxxabi.h>
+
+class Demangle
+{
+    const char* name{};
+public:
+    Demangle(const char* n) : name{n} {}
+    Demangle(const std::string& n) : name{n.c_str()} {}
+    Demangle(const std::type_info& t) : name{t.name()} {}
+    Demangle(const std::type_index& t) : name{t.name()} {}
+    template <typename Stream, typename = Stream::char_type>
+    friend Stream& operator<<(Stream& stream, const Demangle& d)
+    {
+        size_t len{};
+        int status{};
+        std::unique_ptr<char, void (*)(void *)> text{abi::__cxa_demangle(d.name, nullptr, &len, &status), std::free};
+        if (status == 0)
+        {
+            stream << text.get();
+        }
+        return stream;
+    }
+};
 
 //
 #include <iostream>
@@ -75,12 +98,23 @@ namespace tbd
         using RetType = Res;
         using TupleType = ArgsToTuple<ArgTypes...>;
     };
-    template <typename Lambda>
-    using GetRet = typename MemberDecode<decltype(&Lambda::operator())>::RetType;
+
+    // template <typename Lambda> using GetRet = typename MemberDecode<decltype(&Lambda::operator())>::RetType;
 
     template <typename Lambda>
-    using GetTuple = typename MemberDecode<decltype(&Lambda::operator())>::TupleType;
+    struct GetTuple
+    {
+        using Type = typename MemberDecode<decltype(&Lambda::operator())>::TupleType;
+    };
 
+    template <typename... Args>
+    struct GetTuple<void(*)(Args...)>
+    {
+        using Type = ArgsToTuple<Args...>;
+    };
+
+    template <typename Lambda>
+    using GetTuple_t = GetTuple<Lambda>::Type;
 
     template <size_t count, typename NewType, typename... Args>
     constexpr auto AddTypeFunc(Args... args)
@@ -97,13 +131,13 @@ namespace tbd
     template <typename Lambda, typename NewType, typename... Args>
     struct AddType
     {
-        using Type = decltype(AddTypeFunc<std::tuple_size<GetTuple<Lambda>>(), NewType, Args...>(std::declval<Args>()...));
+        using Type = decltype(AddTypeFunc<std::tuple_size<GetTuple_t<Lambda>>(), NewType, Args...>(std::declval<Args>()...));
     };
 
     template <typename Lambda, typename NewType, typename... Args>
     constexpr auto ExtendWithType(Args&&... args)
     {
-        constexpr auto count = std::tuple_size<GetTuple<Lambda>>();
+        constexpr auto count = std::tuple_size<GetTuple_t<Lambda>>();
         if constexpr (sizeof...(Args) < count)
         {
             return ExtendWithType<Lambda, NewType>(std::forward<Args>(args)..., NewType{});
@@ -133,7 +167,7 @@ namespace tbd
             virtual bool GreaterThan(const void* candidate) const = 0;
             virtual std::unique_ptr<ElementBase> MakeUnique() = 0;
 
-            virtual std::type_index ReturnType() const = 0;
+            // virtual std::type_index ReturnType() const = 0;
             virtual std::type_index ArgumentType() const = 0;
             virtual std::type_index SelectArgs() const = 0;
 
@@ -260,7 +294,7 @@ namespace tbd
         template <typename Func, typename SelectType>
         class Select : public ElementBase
         {
-            using TupleType = GetTuple<Func>;
+            using TupleType = GetTuple_t<Func>;
             static inline constexpr std::size_t CallArgCount = std::tuple_size<TupleType>();
 
             SelectType sel_; // the select type is a common size, the func is not.
@@ -294,7 +328,7 @@ namespace tbd
                 auto result = std::make_unique<Select>(std::move(*this));
                 return result;
             }
-            std::type_index ReturnType() const override { return std::type_index{typeid(GetRet<Func>)}; }
+            // std::type_index ReturnType() const override { return std::type_index{typeid(GetRet<Func>)}; }
             std::type_index ArgumentType() const override{ return std::type_index{typeid(TupleType)}; }
             std::type_index SelectArgs() const override{ return std::type_index{typeid(SelectType)}; }
 
@@ -302,7 +336,7 @@ namespace tbd
             explicit Select(Lambda&& func, Args&&... args) :
                 sel_{
                     Extend<Any_t,
-                    GetTuple<Lambda>,
+                    GetTuple_t<Lambda>,
                     std::tuple<std::decay_t<Args>...>
                     >({std::forward<Args>(args)...})},
                 func_{std::move(func)}
@@ -313,7 +347,7 @@ namespace tbd
         Select(Lambda f, Args&&... a) -> Select<Lambda,
         decltype(
             Extend<Any_t,
-                GetTuple<Lambda>,
+                GetTuple_t<Lambda>,
                 std::tuple<const std::decay_t<Args>...>
             >({})
         )>; 
@@ -424,7 +458,7 @@ namespace tbd
     {
         return PubSub::Select<Lambda,
                               decltype(Extend<Any_t,
-                                              GetTuple<Lambda>, std::tuple<const std::decay_t<Args>...>>({}))>{
+                                              GetTuple_t<Lambda>, std::tuple<const std::decay_t<Args>...>>({}))>{
             std::forward<Lambda>(func), std::forward<Args>(args)...};
     }
 
