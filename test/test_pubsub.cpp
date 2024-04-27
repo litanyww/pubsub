@@ -49,6 +49,49 @@ namespace
         }
         return true;
     };
+
+    class Copied
+    {
+    public:
+        struct Content {
+            unsigned int c{};
+            unsigned int m{};
+        };
+    private:
+        Content* x_{};
+    public:
+        Copied() = default;
+        Copied(Content& c) : x_{&c} {}
+        Copied(const Copied& copy) : x_{copy.x_} { ++x_->c; }
+        Copied& operator=(const Copied& copy)
+        {
+            x_ = copy.x_;
+            ++x_->c;
+            return *this;
+        }
+        Copied(Copied&& donor) : x_{std::exchange(donor.x_, nullptr)} { ++x_->m; }
+        Copied& operator=(Copied&& donor)
+        {
+            std::swap(x_, donor.x_);
+            ++x_->m;
+            return *this;
+        }
+        template <typename Stream, typename = typename Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const Copied& v)
+        {
+            if (v.x_)
+            {
+                stream << "Copied[" << v.x_->c << "," << v.x_->m << "]";
+            }
+            else {
+                stream << "Copied[empty]";
+            }
+            return stream;
+        }
+        unsigned int GetCopyCount() const { return x_ ? x_->c : 0U; }
+        unsigned int GetMoveCount() const { return x_ ? x_->m : 0U; }
+        friend auto operator<=>(const Copied& lhs, const Copied& rhs) { return lhs.x_ <=> rhs.x_; }
+    };
 }
 
 TEST(PubSub, BasicTest)
@@ -91,7 +134,7 @@ TEST(PubSub, TextParameter)
 
     std::vector<std::string> results{};
     auto anchor = pubsub.Subscribe([&results](int a, const char *text)
-                                   { results.emplace_back("1:" + std::to_string(a) + "," + text); }, 42);
+                                   { results.emplace_back("1:" + std::to_string(a) + "," + text); }, 42).Final();
 
     auto anchor2 = pubsub.Subscribe([&results](int a, const char *text)
                                     { results.emplace_back("2:" + std::to_string(a) + "," + text); }, tbd::any, std::string{"second"});
@@ -151,13 +194,9 @@ TEST(PubSub, AnchorSync)
     std::promise<void> p{};
     auto f = p.get_future();
     auto anchor = pubsub.Subscribe([&started, &release](int)
-                                   {
-        started.count_down();
-        release.wait(); }, 42)
-                      .Subscribe([&started, &release2](int)
-                                 {
-        started.count_down();
-        release2.wait(); }, 43);
+                                   { started.count_down(); release.wait(); }, 42);
+    anchor.Add([&started, &release2](int)
+                     { started.count_down(); release2.wait(); }, 43);
 
     std::thread thr1{[&pubsub]{
         pubsub.Publish(42); // blocks on callback
@@ -229,8 +268,9 @@ TEST(PubSub, ExpireOnTime)
     auto now = std::chrono::steady_clock::now();
 
     anchor = pubsub.Subscribe([&anchor](std::chrono::steady_clock::time_point)
-                              { anchor = nullptr; }, tbd::GE(now + 10s));
-    anchor.Add( [&latest](int v) { latest = v; });
+                              { anchor = nullptr; }, tbd::GE(now + 10s))
+                 .Subscribe([&latest](int v)
+                            { latest = v; });
     pubsub(1);
     ASSERT_EQ(1, latest);
     pubsub.Publish(now);
@@ -258,4 +298,21 @@ TEST(PubSub, FunctionPointer)
     auto anchor = pubsub.Subscribe(NotALambda, 42);
     pubsub.Publish(42, 123);
     ASSERT_EQ(123, latestNotALambdaArgument);
+}
+
+TEST(PubSub, CopyCount)
+{
+    tbd::PubSub pubsub;
+
+    Copied::Content x{};
+
+    auto anchor = pubsub.Subscribe([](const Copied& c) { });
+    pubsub(Copied{x});
+    ASSERT_EQ(0U, x.c);
+    ASSERT_EQ(0U, x.m);
+
+    anchor = pubsub.Subscribe([](const Copied& c) {}, Copied{x});
+    ASSERT_EQ(0U, x.c);
+    ASSERT_EQ(3U, x.m);
+
 }

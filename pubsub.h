@@ -13,32 +13,6 @@
 #include <shared_mutex>
 #include <mutex>
 #include <thread>
-#include <cxxabi.h>
-
-class Demangle
-{
-    const char* name{};
-public:
-    Demangle(const char* n) : name{n} {}
-    Demangle(const std::string& n) : name{n.c_str()} {}
-    Demangle(const std::type_info& t) : name{t.name()} {}
-    Demangle(const std::type_index& t) : name{t.name()} {}
-    template <typename Stream, typename = Stream::char_type>
-    friend Stream& operator<<(Stream& stream, const Demangle& d)
-    {
-        size_t len{};
-        int status{};
-        std::unique_ptr<char, void (*)(void *)> text{abi::__cxa_demangle(d.name, nullptr, &len, &status), std::free};
-        if (status == 0)
-        {
-            stream << text.get();
-        }
-        return stream;
-    }
-};
-
-//
-#include <iostream>
 
 namespace tbd
 {
@@ -262,12 +236,12 @@ namespace tbd
 
         class Anchor
         {
+        protected:
             std::shared_ptr<Linker> linker_{};
-            std::shared_ptr<Data> data_{};
         public:
             Anchor() = default;
-            Anchor(std::shared_ptr<Data> data, std::shared_ptr<Linker> linker) : linker_{std::move(linker)}, data_{std::move(data)} {}
-            ~Anchor()
+            explicit Anchor( std::shared_ptr<Linker> linker) : linker_{std::move(linker)} {}
+            virtual ~Anchor()
             {
                 if (auto linker = std::move(linker_))
                 {
@@ -285,15 +259,29 @@ namespace tbd
             Anchor& operator=(const Anchor&) = delete;
             explicit operator bool() const { return static_cast<bool>(linker_); }
 
+        };
+
+        class ActiveAnchor : public Anchor
+        {
+            std::shared_ptr<Data> data_{};
+
+        public:
+            ActiveAnchor(std::shared_ptr<Data> data, std::shared_ptr<Linker> linker) : Anchor{std::move(linker)}, data_{std::move(data)} {}
             template <typename Func, typename... Args>
-            [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
+            [[nodiscard]] ActiveAnchor Subscribe(Func func, Args&&... args)
             {
                 Add(std::move(func), std::forward<Args>(args)...);
-                return Anchor{std::move(data_), std::move(linker_)};
+                return ActiveAnchor{std::move(data_), std::move(linker_)};
+            }
+
+            ActiveAnchor &operator=(std::nullptr_t)
+            {
+                auto tmp = std::move(*this);
+                return *this;
             }
 
             template <typename Func, typename... Args>
-            Anchor& Add(Func func, Args&&... args)
+            ActiveAnchor& Add(Func func, Args&&... args)
             {
                 if (!linker_)
                 {
@@ -310,6 +298,10 @@ namespace tbd
                 data_->AddElement(guard, linker_, std::move(sel));
 
                 return *this;
+            }
+            Anchor Final()
+            {
+                return Anchor{std::move(linker_)};
             }
         };
 
@@ -451,7 +443,7 @@ namespace tbd
         }
 
         template <typename Func, typename... Args>
-        [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
+        [[nodiscard]] ActiveAnchor Subscribe(Func func, Args&&... args)
         {
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
@@ -464,11 +456,11 @@ namespace tbd
 
             data_->AddElement(guard, linker, std::move(sel));
 
-            return Anchor{data_, std::move(linker)};
+            return {data_, std::move(linker)};
         }
 
         template <typename Func, typename... Args, typename... Elems>
-        [[nodiscard]] Anchor Subscribe(Select<Func, Args...>&& element, Elems&&... remainder)
+        [[nodiscard]] ActiveAnchor Subscribe(Select<Func, Args...>&& element, Elems&&... remainder)
         {
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
@@ -476,7 +468,7 @@ namespace tbd
             (static_cast<void>(
                 data_->AddElement(guard, linker, remainder.MakeUnique())) , ...);
 
-            return Anchor{data_, std::move(linker)};
+            return {data_, std::move(linker)};
         }
     };
 
