@@ -39,22 +39,34 @@ namespace tbd
     template <typename... Args>
     using ArgsToTuple = std::tuple<const std::remove_const_t<std::decay_t<Args>> &...>;
 
-    template <typename NewType, typename PA, typename TA>
-    constexpr auto Extend(TA&& b)
+    template <typename NewType, typename PA, typename... TA>
+    constexpr auto Extend(TA&&... args)
     {
-        if constexpr (std::tuple_size<TA>() < std::tuple_size<PA>())
+        if constexpr (sizeof...(TA) < std::tuple_size<PA>())
         {
-            return Extend<NewType, PA>(std::tuple_cat(std::forward<TA>(b), std::tuple<NewType>{}));
+            return Extend<NewType, PA>(std::forward<TA>(args)..., NewType{});
         }
         else
         {
-            return b;
+            return std::tuple<TA...>(std::forward<TA>(args)...);
         }
     }
-  
-    template <typename NewType, typename TP, typename TA>
-    using ExtendedTupleType = decltype(Extend<NewType, TA, TP>({}, {}));
 
+    template <typename NewType, typename PA, typename... Args>
+    using ExtendType = decltype(Extend<NewType, PA>(std::declval<Args>()...));
+
+    template <typename Tup, typename... Args>
+    constexpr Tup ExtendTuple(Args&&... args)
+    {
+        if constexpr (sizeof...(Args) < std::tuple_size<Tup>())
+        {
+            return ExtendTuple<Tup>(std::forward<Args>(args)..., decltype(std::get<sizeof...(Args)>(std::declval<Tup>())){});
+        }
+        else
+        {
+            return Tup{std::forward<Args>(args)...};
+        }
+    }
     template <typename Signature>
     class MemberDecode;
 
@@ -108,19 +120,8 @@ namespace tbd
         using Type = decltype(AddTypeFunc<std::tuple_size<GetTuple_t<Lambda>>(), NewType, Args...>(std::declval<Args>()...));
     };
 
-    template <typename Lambda, typename NewType, typename... Args>
-    constexpr auto ExtendWithType(Args&&... args)
-    {
-        constexpr auto count = std::tuple_size<GetTuple_t<Lambda>>();
-        if constexpr (sizeof...(Args) < count)
-        {
-            return ExtendWithType<Lambda, NewType>(std::forward<Args>(args)..., NewType{});
-        }
-        else
-        {
-            return std::tuple<Args...>{std::forward<Args>(args)...};
-        }
-    }
+    template <typename Lambda, typename... Args>
+    using SelType = ExtendType<Any_t, GetTuple_t<Lambda>, const std::decay_t<Args>...>;
 
 
     class PubSub
@@ -289,9 +290,7 @@ namespace tbd
                 }
                 auto guard = data_->GetLock();
 
-                auto sel = std::make_unique<Select<Func, decltype(Extend<Any_t,
-                                                                        GetTuple_t<Func>,
-                                                                        std::tuple<const std::decay_t<Args>...>>({}))>>(
+                auto sel = std::make_unique<Select<Func, SelType<Func, Args...>>>(
                     std::move(func),
                     std::forward<Args>(args)...);
 
@@ -348,23 +347,15 @@ namespace tbd
 
             template <typename Lambda, typename... Args>
             explicit Select(Lambda&& func, Args&&... args) :
-                sel_{
-                    Extend<Any_t,
-                    GetTuple_t<Lambda>,
-                    std::tuple<std::decay_t<Args>...>
-                    >({std::forward<Args>(args)...})},
+                sel_{ ExtendTuple<SelType<Lambda, Args...>>(std::forward<Args>(args)...)},
                 func_{std::move(func)}
             {
             }
         };
+
         template <typename Lambda, typename... Args>
-        Select(Lambda f, Args&&... a) -> Select<Lambda,
-        decltype(
-            Extend<Any_t,
-                GetTuple_t<Lambda>,
-                std::tuple<const std::decay_t<Args>...>
-            >({})
-        )>; 
+        Select(Lambda f, Args&&... a) -> Select<Lambda, SelType<Lambda, Args...>>;
+
 
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
         using PerPrototype = std::map<std::type_index, GroupSelector>;
@@ -448,9 +439,8 @@ namespace tbd
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
 
-            auto sel = std::make_unique<Select<Func, decltype(Extend<Any_t,
-                                                                     GetTuple_t<Func>,
-                                                                     std::tuple<const std::decay_t<Args>...>>({}))>>(
+            auto sel = std::make_unique<
+            Select<Func, SelType<Func, Args...>>>(
                 std::move(func),
                 std::forward<Args>(args)...);
 
@@ -475,9 +465,7 @@ namespace tbd
     template <typename Lambda, typename... Args>
     auto Select(Lambda &&func, Args &&...args)
     {
-        return PubSub::Select<Lambda,
-                              decltype(Extend<Any_t,
-                                              GetTuple_t<Lambda>, std::tuple<const std::decay_t<Args>...>>({}))>{
+        return PubSub::Select<Lambda, SelType<Lambda, Args...>>{
             std::forward<Lambda>(func), std::forward<Args>(args)...};
     }
 
@@ -589,5 +577,4 @@ namespace tbd
     };
     template<typename Type>
     GT(Type&&) -> GT<Type>;
-
 }

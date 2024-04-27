@@ -313,6 +313,6 @@ TEST(PubSub, CopyCount)
 
     anchor = pubsub.Subscribe([](const Copied& c) {}, Copied{x});
     ASSERT_EQ(0U, x.c);
-    ASSERT_EQ(3U, x.m);
+    ASSERT_EQ(1U, x.m);
 
 }
