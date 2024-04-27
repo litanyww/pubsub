@@ -258,20 +258,15 @@ namespace tbd
             static Guard Protect(std::shared_ptr<Linker> linker) { return Guard{std::move(linker)}; }
         };
 
-        class RunContext
-        {
-            ElementBase* element;
-            std::weak_ptr<Linker> linker; // for protecting the thread
-
-
-        };
+        class Data;
 
         class Anchor
         {
             std::shared_ptr<Linker> linker_{};
+            std::shared_ptr<Data> data_{};
         public:
             Anchor() = default;
-            Anchor(std::shared_ptr<Linker> linker) : linker_{std::move(linker)} {}
+            Anchor(std::shared_ptr<Data> data, std::shared_ptr<Linker> linker) : linker_{std::move(linker)}, data_{std::move(data)} {}
             ~Anchor()
             {
                 if (auto linker = std::move(linker_))
@@ -289,6 +284,33 @@ namespace tbd
             Anchor(const Anchor&) = delete;
             Anchor& operator=(const Anchor&) = delete;
             explicit operator bool() const { return static_cast<bool>(linker_); }
+
+            template <typename Func, typename... Args>
+            [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
+            {
+                Add(std::move(func), std::forward<Args>(args)...);
+                return Anchor{std::move(data_), std::move(linker_)};
+            }
+
+            template <typename Func, typename... Args>
+            Anchor& Add(Func func, Args&&... args)
+            {
+                if (!linker_)
+                {
+                    throw std::runtime_error{"Invalid anchor"};
+                }
+                auto guard = data_->GetLock();
+
+                auto sel = std::make_unique<Select<Func, decltype(Extend<Any_t,
+                                                                        GetTuple_t<Func>,
+                                                                        std::tuple<const std::decay_t<Args>...>>({}))>>(
+                    std::move(func),
+                    std::forward<Args>(args)...);
+
+                data_->AddElement(guard, linker_, std::move(sel));
+
+                return *this;
+            }
         };
 
         template <typename Func, typename SelectType>
@@ -422,6 +444,12 @@ namespace tbd
             }
         }
 
+        template <typename... Args>
+        void operator()(Args&&... args)
+        {
+            Publish(std::forward<Args>(args)...);
+        }
+
         template <typename Func, typename... Args>
         [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
         {
@@ -436,7 +464,7 @@ namespace tbd
 
             data_->AddElement(guard, linker, std::move(sel));
 
-            return Anchor{std::move(linker)};
+            return Anchor{data_, std::move(linker)};
         }
 
         template <typename Func, typename... Args, typename... Elems>
@@ -448,7 +476,7 @@ namespace tbd
             (static_cast<void>(
                 data_->AddElement(guard, linker, remainder.MakeUnique())) , ...);
 
-            return Anchor{std::move(linker)};
+            return Anchor{data_, std::move(linker)};
         }
     };
 

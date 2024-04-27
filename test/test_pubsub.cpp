@@ -150,14 +150,14 @@ TEST(PubSub, AnchorSync)
     tbd::PubSub pubsub{};
     std::promise<void> p{};
     auto f = p.get_future();
-    auto anchor = pubsub.Subscribe(tbd::Select([&started, &release](int)
-                                          {
+    auto anchor = pubsub.Subscribe([&started, &release](int)
+                                   {
         started.count_down();
-        release.wait(); }, 42),
-                                   tbd::Select([&started, &release2](int)
-                                          {
+        release.wait(); }, 42)
+                      .Subscribe([&started, &release2](int)
+                                 {
         started.count_down();
-        release2.wait(); }, 43));
+        release2.wait(); }, 43);
 
     std::thread thr1{[&pubsub]{
         pubsub.Publish(42); // blocks on callback
@@ -228,20 +228,19 @@ TEST(PubSub, ExpireOnTime)
     tbd::PubSub::Anchor anchor;
     auto now = std::chrono::steady_clock::now();
 
-    anchor = pubsub.Subscribe(tbd::Select([&anchor](std::chrono::steady_clock::time_point)
-                                          { anchor = nullptr; }, tbd::GE(now + 10s)),
-                              tbd::Select([&latest](int v)
-                                          { latest = v; }));
-    pubsub.Publish(1);
+    anchor = pubsub.Subscribe([&anchor](std::chrono::steady_clock::time_point)
+                              { anchor = nullptr; }, tbd::GE(now + 10s));
+    anchor.Add( [&latest](int v) { latest = v; });
+    pubsub(1);
     ASSERT_EQ(1, latest);
     pubsub.Publish(now);
     pubsub.Publish(2);
     ASSERT_EQ(2, latest);
-    pubsub.Publish(now + 9s);
-    pubsub.Publish(3);
+    pubsub(now + 9s);
+    pubsub(3);
     ASSERT_EQ(3, latest);
-    pubsub.Publish(now + 10s);
-    pubsub.Publish(4);
+    pubsub(now + 10s);
+    pubsub(4);
     ASSERT_EQ(3, latest);
 }
 
