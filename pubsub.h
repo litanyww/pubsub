@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 
 namespace tbd
 {
@@ -358,7 +359,7 @@ namespace tbd
 
 
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
-        using PerPrototype = std::map<std::type_index, GroupSelector>;
+        using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
 
         class Data
         {
