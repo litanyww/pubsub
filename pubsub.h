@@ -449,26 +449,7 @@ namespace tbd
 
             return {data_, std::move(linker)};
         }
-
-        template <typename Func, typename... Args, typename... Elems>
-        [[nodiscard]] ActiveAnchor Subscribe(Select<Func, Args...>&& element, Elems&&... remainder)
-        {
-            auto linker = std::make_shared<Linker>();
-            auto guard = data_->GetLock();
-            data_->AddElement(guard, linker, element.MakeUnique());
-            (static_cast<void>(
-                data_->AddElement(guard, linker, remainder.MakeUnique())) , ...);
-
-            return {data_, std::move(linker)};
-        }
     };
-
-    template <typename Lambda, typename... Args>
-    auto Select(Lambda &&func, Args &&...args)
-    {
-        return PubSub::Select<Lambda, SelType<Lambda, Args...>>{
-            std::forward<Lambda>(func), std::forward<Args>(args)...};
-    }
 
     template <typename Type>
     class LE

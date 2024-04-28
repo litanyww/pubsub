@@ -107,10 +107,10 @@ TEST(PubSub, BasicTest)
     std::vector<std::string> results{};
     auto sub1 = pubsub.Subscribe([&results](int v)
                                  { results.emplace_back("sub1:" + std::to_string(v)); }, 42);
-    auto sub2 = pubsub.Subscribe(tbd::PubSub::Select{[&results](int v)
-                                                      { results.emplace_back("sub2:" + std::to_string(v)); }, 42});
-    auto sub3 = pubsub.Subscribe(Select([&results](int v)
-                                        { results.emplace_back("sub3:" + std::to_string(v)); }, 42));
+    auto sub2 = pubsub.Subscribe([&results](int v)
+                                                      { results.emplace_back("sub2:" + std::to_string(v)); }, 42);
+    auto sub3 = pubsub.Subscribe([&results](int v)
+                                        { results.emplace_back("sub3:" + std::to_string(v)); }, 42);
 
     auto sub4 = pubsub.Subscribe([&results](int a, int b)
                                  { results.emplace_back("sub4:" + std::to_string(a) + "," + std::to_string(b)); }, 42);
