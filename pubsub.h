@@ -173,6 +173,10 @@ namespace tbd
             {
                 entries_.emplace_back(&selectors, it);
             }
+            explicit operator bool() const
+            {
+                return !entries_.empty();
+            }
             ~Linker() { Destroy(); }
             void Destroy()
             {
@@ -236,6 +240,22 @@ namespace tbd
 
         class Data;
 
+        class Term
+        {
+            std::weak_ptr<Linker> linker_{};
+        public:
+            Term() = default;
+            Term(std::weak_ptr<Linker> linker) : linker_{std::move(linker)} {}
+
+            void Terminate() const
+            {
+                if (auto linker = linker_.lock())
+                {
+                    linker->Destroy();
+                }
+            }
+        };
+
         class Anchor
         {
         protected:
@@ -259,8 +279,8 @@ namespace tbd
             Anchor& operator=(Anchor&&) = default;
             Anchor(const Anchor&) = delete;
             Anchor& operator=(const Anchor&) = delete;
-            explicit operator bool() const { return static_cast<bool>(linker_); }
-
+            explicit operator bool() const { return linker_ && *linker_; }
+            Term GetTerminator() const { return Term{linker_}; }
         };
 
         class ActiveAnchor : public Anchor

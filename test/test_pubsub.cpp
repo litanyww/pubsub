@@ -151,16 +151,16 @@ TEST(PubSub, Recursion)
 {
     tbd::PubSub pubsub{};
 
-    tbd::PubSub::Anchor subAnchor{};
+    auto subAnchor = pubsub.MakeAnchor();
     ASSERT_FALSE(subAnchor);
     std::vector<std::string> results{};
     auto anchor = pubsub.MakeAnchor();
     anchor.Add([&pubsub, &subAnchor, &results](int a)
                                    { if (!subAnchor) {
-                                    subAnchor = pubsub.Subscribe([&subAnchor, &results](int b)
+                                    subAnchor.Add([term = subAnchor.GetTerminator(), &results](int b)
                                                                   {
                                                                         results.emplace_back("sub:" + std::to_string(b));
-                                                                        subAnchor = nullptr; },
+                                                                        term.Terminate(); },
                                                                   69); } },
                                    42);
     ASSERT_TRUE(anchor);
