@@ -154,7 +154,8 @@ TEST(PubSub, Recursion)
     tbd::PubSub::Anchor subAnchor{};
     ASSERT_FALSE(subAnchor);
     std::vector<std::string> results{};
-    auto anchor = pubsub.Subscribe([&pubsub, &subAnchor, &results](int a)
+    auto anchor = pubsub.MakeAnchor();
+    anchor.Add([&pubsub, &subAnchor, &results](int a)
                                    { if (!subAnchor) {
                                     subAnchor = pubsub.Subscribe([&subAnchor, &results](int b)
                                                                   {

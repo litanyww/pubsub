@@ -449,6 +449,11 @@ namespace tbd
 
             return {data_, std::move(linker)};
         }
+
+        [[nodiscard]] ActiveAnchor MakeAnchor()
+        {
+            return {data_, std::make_shared<Linker>()};
+        }
     };
 
     template <typename Type>
