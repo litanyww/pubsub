@@ -410,7 +410,7 @@ namespace tbd
         std::shared_ptr<Data> data_{std::make_shared<Data>()};
 
         template<typename... Args>
-        void Publish(Args&&... args)
+        void Publish(Args&&... args) const
         {
             ArgsToTuple<Args...> argTuple{std::forward<Args>(args)...};
 
@@ -429,7 +429,7 @@ namespace tbd
         }
 
         template <typename... Args>
-        void operator()(Args&&... args)
+        void operator()(Args&&... args) const
         {
             Publish(std::forward<Args>(args)...);
         }
