@@ -1,5 +1,4 @@
 #pragma once
-// #include <functional>
 
 #include <cstddef>
 #include <deque>
@@ -14,6 +13,8 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <iostream>
+#include "demangle.h"
 
 namespace tbd
 {
@@ -129,6 +130,8 @@ namespace tbd
     {
     public:
         class Linker;
+        class Data;
+
         class ElementBase
         {
             std::weak_ptr<Linker> linker_{};
@@ -177,6 +180,7 @@ namespace tbd
             {
                 return !entries_.empty();
             }
+            size_t size() const { return entries_.size(); }
             ~Linker() { Destroy(); }
             void Destroy()
             {
@@ -238,8 +242,6 @@ namespace tbd
             static Guard Protect(std::shared_ptr<Linker> linker) { return Guard{std::move(linker)}; }
         };
 
-        class Data;
-
         class Term
         {
             std::weak_ptr<Linker> linker_{};
@@ -280,6 +282,7 @@ namespace tbd
             Anchor(const Anchor&) = delete;
             Anchor& operator=(const Anchor&) = delete;
             explicit operator bool() const { return linker_ && *linker_; }
+            size_t size() const { return linker_ ? linker_->size() : 0UL; }
             Term GetTerminator() const { return Term{linker_}; }
         };
 
@@ -377,7 +380,6 @@ namespace tbd
         template <typename Lambda, typename... Args>
         Select(Lambda f, Args&&... a) -> Select<Lambda, SelType<Lambda, Args...>>;
 
-
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
         using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
 
@@ -385,19 +387,27 @@ namespace tbd
         {
             std::map<std::type_index, PerPrototype> database_{};
             std::shared_mutex lock_{};
+            std::ostream* debugStream_{};
 
             using ScopedLock = std::scoped_lock<std::shared_mutex>;
 
         public:
+            Data() {}
+            explicit Data(std::ostream& debugStream) : debugStream_{&debugStream} {}
             ScopedLock GetLock() { return ScopedLock{lock_}; }
 
             void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
             {
+                auto argType = base->ArgumentType();
                 auto& perPrototype = database_[base->ArgumentType()];
                 auto& selectorSet = perPrototype[base->SelectArgs()];
                 auto it = selectorSet.insert(std::move(base));
                 linker->Remember(selectorSet, it);
                 (*it)->SetLinker(linker);
+                if (debugStream_)
+                {
+                    *debugStream_ << "added : " << Demangle(argType) << "\n";
+                }
             }
 
             template <typename Type>
@@ -423,11 +433,16 @@ namespace tbd
 
                     }
                 }
+                else if (debugStream_)
+                {
+                    *debugStream_ << "no subscriptions for " << Demangle(typeid(Type)) << "\n";
+                }
                 return winners;
             }
-
         };
-        std::shared_ptr<Data> data_{std::make_shared<Data>()};
+
+        PubSub() = default;
+        explicit PubSub(std::ostream &debugStream) : data_{std::make_shared<Data>(debugStream)} {}
 
         template<typename... Args>
         void Publish(Args&&... args) const
@@ -474,6 +489,9 @@ namespace tbd
         {
             return {data_, std::make_shared<Linker>()};
         }
+
+    private:
+        std::shared_ptr<Data> data_{std::make_shared<Data>()};
     };
 
     template <typename Type>

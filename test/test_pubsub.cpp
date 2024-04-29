@@ -1,4 +1,5 @@
 #include "pubsub.h"
+#include "demangle.h"
 
 #include <gtest/gtest.h>
 #include <chrono>
@@ -315,5 +316,253 @@ TEST(PubSub, CopyCount)
     anchor = pubsub.Subscribe([](const Copied& c) {}, Copied{x});
     ASSERT_EQ(0U, x.c);
     ASSERT_EQ(1U, x.m);
+}
 
+template <class Rep, class Period>
+constexpr size_t OperationsPerSecond(size_t iterations, std::chrono::duration<Rep, Period> elapsed)
+{
+    return iterations * Period::den / (elapsed.count() * Period::num /* * Rep */);
+}
+
+class Measure
+{
+    size_t iterations{};
+    std::chrono::high_resolution_clock::time_point start{std::chrono::high_resolution_clock::now()};
+    std::chrono::high_resolution_clock::time_point end{};
+public:
+    explicit Measure(size_t i) : iterations{i} {}
+    void Stop() { end = std::chrono::high_resolution_clock::now(); }
+    template <typename Stream, typename = typename Stream::char_type>
+    friend Stream& operator<<(Stream& stream, const Measure& m)
+    {
+        auto end = m.end.time_since_epoch().count() ? m.end : std::chrono::high_resolution_clock::now();
+        auto ops = OperationsPerSecond(m.iterations, end - m.start);
+        if (ops >= 1'000'000)
+        {
+            stream << ops/ 1'000'000.0 << " mops";
+        }
+        else if (ops >= 1'000)
+        {
+            stream << ops/ 1'000.0 << " kops";
+        }
+        else
+        {
+            stream << ops << " ops";
+        }
+        return stream;
+    }
+};
+
+TEST(PubSub, PerfNoSubscription)
+{
+    tbd::PubSub pubsub;
+    constexpr auto iterations = 1'000'000UL;
+    using T = std::remove_const_t<decltype(iterations)>;
+
+    Measure m{iterations};
+    for (T i{}; i < iterations; ++i)
+    {
+        pubsub.Publish(i);
+    }
+    m.Stop();
+    std::cerr << "no subscription perf: " << m << "\n";
+}
+TEST(PubSub, PerfOneSubscriptionNoMatch)
+{
+    tbd::PubSub pubsub;
+    auto anchor = pubsub.Subscribe([](int){}, 42);
+    constexpr auto iterations = 1'000'000UL;
+    using T = std::remove_const_t<decltype(iterations)>;
+
+    Measure m{iterations};
+    for (T i{}; i < iterations; ++i)
+    {
+        pubsub.Publish(69);
+    }
+    m.Stop();
+    std::cerr << "one subscription no match perf: " << m << "\n";
+}
+TEST(PubSub, PerfOneSubscriptionMatch)
+{
+    tbd::PubSub pubsub;
+    auto anchor = pubsub.Subscribe([](int){}, 42);
+    constexpr auto iterations = 1'000'000UL;
+    using T = std::remove_const_t<decltype(iterations)>;
+
+    Measure m{iterations};
+    for (T i{}; i < iterations; ++i)
+    {
+        pubsub.Publish(42);
+    }
+    m.Stop();
+    std::cerr << "one subscription match perf: " << m << "\n";
+}
+
+TEST(PubSub, PerfOneKSubscriptionNoMatch)
+{
+    constexpr auto iterations = 1'000'000UL;
+    constexpr auto subs = 1'000;
+    tbd::PubSub pubsub;
+    std::deque<tbd::PubSub::Anchor> anchors{};
+    for (std::remove_const_t<decltype(subs)> i{}; i < subs ; ++i)
+    {
+        anchors.push_back(pubsub.Subscribe([](int i){std::cerr << "MATCH! " << i << "\n";}, i));
+    }
+
+    Measure m{iterations};
+    for (std::remove_const_t<decltype(iterations)> i{}; i < iterations; ++i)
+    {
+        pubsub.Publish(static_cast<int>(1042));
+    }
+    m.Stop();
+    std::cerr << "1k subscription no match perf: " << m << "\n";
+}
+
+TEST(PubSub, PerfOneKSubscriptionMatch)
+{
+    constexpr auto iterations = 1'000'000UL;
+    constexpr auto subs = 1'000;
+    tbd::PubSub pubsub;
+    std::deque<tbd::PubSub::Anchor> anchors{};
+    Measure s(subs);
+    for (std::remove_const_t<decltype(subs)> i{}; i < subs ; ++i)
+    {
+        anchors.push_back(pubsub.Subscribe([](int){}, i));
+    }
+    s.Stop();
+    std::cerr << "1k subscription rate: " << s << "\n";
+
+    Measure m{iterations};
+    for (std::remove_const_t<decltype(iterations)> i{}; i < iterations; ++i)
+    {
+        pubsub.Publish(static_cast<int>(i));
+    }
+    m.Stop();
+    std::cerr << "1k subscription match perf: " << m << "\n";
+}
+
+enum class Op {
+    ProcessStart, // pid, path
+    FileOpen, // pid, fd, how, path
+    FileClose, // pid, fd
+    ProcessEnd, // pid
+    FileDelete, // pid, path
+};
+
+enum class Suspicious {
+    FileCreated, // path
+};
+
+enum class How {
+    Read=1,
+    Write=2,
+    Exec=4,
+};
+How &operator|=(How &lhs, How rhs)
+{
+    lhs = static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) | static_cast<std::underlying_type_t<How>>(rhs));
+    return lhs;
+}
+How &operator&=(How &lhs, How rhs)
+{
+    lhs = static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) & static_cast<std::underlying_type_t<How>>(rhs));
+    return lhs;
+}
+How &operator^=(How &lhs, How rhs)
+{
+    lhs = static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) ^ static_cast<std::underlying_type_t<How>>(rhs));
+    return lhs;
+}
+How operator|(How lhs, How rhs) { lhs |= rhs; return lhs; }
+How operator&(How lhs, How rhs) { lhs &= rhs; return lhs; }
+How operator^(How lhs, How rhs) { lhs ^= rhs; return lhs; }
+
+template <class Stream, typename = typename Stream::char_type>
+Stream& operator<<(Stream& stream, How h)
+{
+    const char* comma = "";
+    if ((h & How::Read) == How::Read)
+    {
+        stream << comma << "Read";
+        comma = "|";
+    }
+    if ((h & How::Write) == How::Write)
+    {
+        stream << comma << "Write";
+        comma = "|";
+    }
+    if ((h & How::Exec) == How::Exec)
+    {
+        stream << comma << "Exec";
+        comma = "|";
+    }
+    return stream;
+}
+
+void SimSub(const tbd::PubSub& pubsub, const char* procName = "/procName", const char* fileName = "/fileName", std::function<void()> payload = nullptr)
+{
+    constexpr pid_t pid{1234};
+    constexpr int fd{42};
+    pubsub(Op::ProcessStart, pid, procName);
+    pubsub(Op::FileOpen, pid, fd, How::Write, fileName);
+    pubsub(Op::FileClose, pid, fd);
+    if (payload)
+    {
+        payload();
+    }
+    pubsub(Op::ProcessEnd, pid);
+}
+
+tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
+{
+    auto anchor = pubsub.MakeAnchor();
+    anchor.Add([pubsub, anchors = std::vector<tbd::PubSub::Anchor>()](Op, pid_t pid, int fd, How how, const char *filePath) mutable {
+        // a file has been opened
+        if ((how & How::Write) == How::Write)
+        {
+            auto anchor = pubsub.MakeAnchor();
+            anchor.Add([pubsub, filePath, term = anchor.GetTerminator()](Op, pid_t, int)
+                       {
+                pubsub(Suspicious::FileCreated, filePath);
+                term.Terminate(); }, Op::FileClose, pid);
+            anchor.Add([term = anchor.GetTerminator()](Op, pid_t)
+                       {
+                        term.Terminate(); }, Op::ProcessEnd, pid);
+            anchors.push_back(std::move(anchor));
+        }
+    }, Op::FileOpen, pid);
+    anchor.Add([term = anchor.GetTerminator()](Op, pid_t)
+               {
+                // if the process ends, we stop watching for file operations on this pid
+                term.Terminate(); }, Op::ProcessEnd, pid);
+    return anchor;
+}
+
+TEST(PubSub, Example)
+{
+    tbd::PubSub pubsub{};
+    auto anchor = pubsub.MakeAnchor();
+    anchor.Add([pubsub, anchors= std::vector<tbd::PubSub::Anchor>()](Op, pid_t pid, const char* path) mutable {
+        // Process has started
+        anchors.push_back(processStarted(pubsub, pid));
+    }, Op::ProcessStart);
+    unsigned int hitCount{};
+    anchor.Add([pubsub, &hitCount, anchors = std::vector<tbd::PubSub::Anchor>{}](Suspicious, const char *path) mutable
+               { 
+               auto anchor = pubsub.Subscribe([&hitCount](Op, pid_t pid, const char* path) {
+                ++hitCount;
+               }, Op::ProcessStart, tbd::any, std::string{"/maliciousFile"});
+               anchor.Add([term = anchor.GetTerminator()](Op, pid_t, const char* path) {term.Terminate(); }, Op::FileDelete, tbd::any, path);
+               anchors.push_back(std::move(anchor)); }, Suspicious::FileCreated);
+
+    SimSub(pubsub, "/procName", "/maliciousFile");
+    ASSERT_EQ(0U, hitCount);
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1024), "/maliciousFile");
+    ASSERT_EQ(1U, hitCount);
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1025), "/maliciousFile");
+    ASSERT_EQ(2U, hitCount);
+    hitCount = 0U; // after delete, no more hits
+    pubsub(Op::FileDelete, static_cast<pid_t>(1026), "/maliciousFile");
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1027), "/maliciousFile");
+    ASSERT_EQ(0U, hitCount);
 }
