@@ -38,8 +38,28 @@ namespace tbd
     };
     constexpr static Any_t any;
 
+    template <class T>
+    struct ArgToTuple
+    {
+        using Type = const std::remove_const_t<T>&;
+    };
+    template <class T>
+    struct ArgToTuple<T*>
+    {
+        using Type = T*;
+    };
+
+    template <class T>
+    struct ArgToTuple<T&>
+    {
+        using Type = T&;
+    };
+
+    template <typename Type>
+    using ArgToTuple_t = const ArgToTuple<std::decay_t<Type>>::Type;
+
     template <typename... Args>
-    using ArgsToTuple = std::tuple<const std::remove_const_t<std::decay_t<Args>> &...>;
+    using ArgsToTuple = std::tuple<ArgToTuple_t<Args>...>;
 
     template <typename NewType, typename PA, typename... TA>
     constexpr auto Extend(TA&&... args)
@@ -447,7 +467,7 @@ namespace tbd
         template<typename... Args>
         void Publish(Args&&... args) const
         {
-            ArgsToTuple<Args...> argTuple{std::forward<Args>(args)...};
+            ArgsToTuple<Args...> argTuple{args...};
 
             // unlock
             for (auto weak : data_->GetMatches(argTuple))

@@ -102,7 +102,7 @@ TEST(PubSub, BasicTest)
     auto func = [](int, const char *, long, long) {};
     const char *text = "abc";
     PubSub::Select foo{[](int, const char *, long, long) {}, 1, text};
-    ASSERT_EQ(typeid(std::tuple<const int &, const char *const &, long const &, long const &>), foo.ArgumentType());
+    ASSERT_EQ(typeid(std::tuple<const int &, const char *const , long const &, long const &>), foo.ArgumentType()) << Demangle(typeid(foo.ArgumentType()));
     ASSERT_EQ(typeid(std::tuple<const int, const char *const, Any_t, Any_t>), foo.SelectArgs());
 
     std::vector<std::string> results{};
