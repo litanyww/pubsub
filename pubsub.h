@@ -36,7 +36,7 @@ namespace tbd
             return true;
         }
 
-        template<typename Stream, typename = Stream::char_type>
+        template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const Any_t&)
         {
             stream << "any";
@@ -131,26 +131,6 @@ namespace tbd
 
     template<typename Lambda>
     using GetTuple_t = GetTuple<Lambda>::Type;
-
-    template<size_t count, typename NewType, typename... Args>
-    constexpr auto AddTypeFunc(Args... args)
-    {
-        if (sizeof...(Args) < count)
-        {
-            return AddTypeFunc<count, NewType, Args..., NewType>(args..., NewType{});
-        }
-        else
-        {
-            return std::tuple<Args...>{ args... };
-        }
-    }
-
-    template<typename Lambda, typename NewType, typename... Args>
-    struct AddType
-    {
-        using Type =
-            decltype(AddTypeFunc<std::tuple_size<GetTuple_t<Lambda>>(), NewType, Args...>(std::declval<Args>()...));
-    };
 
     template<typename Lambda, typename... Args>
     using SelType = ExtendType<Any_t, GetTuple_t<Lambda>, const std::decay_t<Args>...>;
@@ -550,7 +530,7 @@ namespace tbd
         friend bool operator<(const LE& lhs, const Type& rhs) { return lhs.value_ < rhs; }
         friend bool operator<(const Type&, const LE&) { return false; }
 
-        template<typename Stream, typename = Stream::char_type>
+        template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const LE& g)
         {
             stream << "LE<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -579,7 +559,7 @@ namespace tbd
         friend bool operator<(const LT& lhs, const Type& rhs) { return lhs.value_ <= rhs; }
         friend bool operator<(const Type&, const LT&) { return false; }
 
-        template<typename Stream, typename = Stream::char_type>
+        template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const LT& g)
         {
             stream << "LT<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -608,7 +588,7 @@ namespace tbd
         friend bool operator<(const GE&, const Type&) { return false; }
         friend bool operator<(const Type& lhs, const GE& rhs) { return lhs < rhs.value_; }
 
-        template<typename Stream, typename = Stream::char_type>
+        template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const GE& g)
         {
             stream << "GE<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -635,7 +615,7 @@ namespace tbd
         friend bool operator<(const GT& lhs, const GT& rhs) { return lhs.value_ < rhs.value_; }
         friend bool operator<(const GT&, const Type&) { return false; }
         friend bool operator<(const Type& lhs, const GT& rhs) { return lhs <= rhs.value_; }
-        template<typename Stream, typename = Stream::char_type>
+        template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const GT& g)
         {
             stream << "GT<" << typeid(Type).name() << ">{" << g.value_ << "}";
