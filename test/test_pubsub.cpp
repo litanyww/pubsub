@@ -1,16 +1,17 @@
-#include "pubsub.h"
 #include "demangle.h"
+#include "pubsub.h"
 
 #include <gtest/gtest.h>
+
 #include <chrono>
-#include <typeindex>
-#include <latch>
-#include <iostream>
-#include <vector>
-#include <string>
-#include <future>
 #include <deque>
+#include <future>
+#include <iostream>
+#include <latch>
+#include <string>
 #include <thread>
+#include <typeindex>
+#include <vector>
 
 namespace
 {
@@ -21,15 +22,15 @@ namespace
     {
         using is_transparent = void;
 
-        template <typename L, typename R>
-        bool operator()(const L &lhs, const R &rhs) const
+        template<typename L, typename R>
+        bool operator()(const L& lhs, const R& rhs) const
         {
             bool result = lhs < rhs;
             // std::cerr << " " << lhs << " < " << rhs << " = " << std::boolalpha << result << "\n";
             return result;
         }
     };
-    template <typename T>
+    template<typename T>
     bool show(std::pair<int, int> p, int trigger, int expectedFirst, int expectedLast)
     {
         std::map<T, int, TCompare> values{};
@@ -54,37 +55,41 @@ namespace
     class Copied
     {
     public:
-        struct Content {
+        struct Content
+        {
             unsigned int c{};
             unsigned int m{};
         };
+
     private:
         Content* x_{};
+
     public:
         Copied() = default;
-        Copied(Content& c) : x_{&c} {}
-        Copied(const Copied& copy) : x_{copy.x_} { ++x_->c; }
+        Copied(Content& c) : x_{ &c } {}
+        Copied(const Copied& copy) : x_{ copy.x_ } { ++x_->c; }
         Copied& operator=(const Copied& copy)
         {
             x_ = copy.x_;
             ++x_->c;
             return *this;
         }
-        Copied(Copied&& donor) : x_{std::exchange(donor.x_, nullptr)} { ++x_->m; }
+        Copied(Copied&& donor) : x_{ std::exchange(donor.x_, nullptr) } { ++x_->m; }
         Copied& operator=(Copied&& donor)
         {
             std::swap(x_, donor.x_);
             ++x_->m;
             return *this;
         }
-        template <typename Stream, typename = typename Stream::char_type>
+        template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const Copied& v)
         {
             if (v.x_)
             {
                 stream << "Copied[" << v.x_->c << "," << v.x_->m << "]";
             }
-            else {
+            else
+            {
                 stream << "Copied[empty]";
             }
             return stream;
@@ -93,30 +98,30 @@ namespace
         unsigned int GetMoveCount() const { return x_ ? x_->m : 0U; }
         friend auto operator<=>(const Copied& lhs, const Copied& rhs) { return lhs.x_ <=> rhs.x_; }
     };
-}
+} // namespace
 
 TEST(PubSub, BasicTest)
 {
     using namespace tbd;
     PubSub pubsub{};
-    auto func = [](int, const char *, long, long) {};
-    const char *text = "abc";
-    PubSub::Select foo{[](int, const char *, long, long) {}, 1, text};
-    ASSERT_EQ(typeid(std::tuple<const int &, const char *const , long const &, long const &>), foo.ArgumentType()) << Demangle(typeid(foo.ArgumentType()));
-    ASSERT_EQ(typeid(std::tuple<const int, const char *const, Any_t, Any_t>), foo.SelectArgs());
+    auto func = [](int, const char*, long, long) {};
+    const char* text = "abc";
+    PubSub::Select foo{ [](int, const char*, long, long) {}, 1, text };
+    ASSERT_EQ(typeid(std::tuple<const int&, const char* const, long const&, long const&>), foo.ArgumentType())
+        << Demangle(typeid(foo.ArgumentType()));
+    ASSERT_EQ(typeid(std::tuple<const int, const char* const, Any_t, Any_t>), foo.SelectArgs());
 
     std::vector<std::string> results{};
-    auto sub1 = pubsub.Subscribe([&results](int v)
-                                 { results.emplace_back("sub1:" + std::to_string(v)); }, 42);
-    auto sub2 = pubsub.Subscribe([&results](int v)
-                                                      { results.emplace_back("sub2:" + std::to_string(v)); }, 42);
-    auto sub3 = pubsub.Subscribe([&results](int v)
-                                        { results.emplace_back("sub3:" + std::to_string(v)); }, 42);
+    auto sub1 = pubsub.Subscribe([&results](int v) { results.emplace_back("sub1:" + std::to_string(v)); }, 42);
+    auto sub2 = pubsub.Subscribe([&results](int v) { results.emplace_back("sub2:" + std::to_string(v)); }, 42);
+    auto sub3 = pubsub.Subscribe([&results](int v) { results.emplace_back("sub3:" + std::to_string(v)); }, 42);
 
-    auto sub4 = pubsub.Subscribe([&results](int a, int b)
-                                 { results.emplace_back("sub4:" + std::to_string(a) + "," + std::to_string(b)); }, 42);
-    auto sub5 = pubsub.Subscribe([&results](int a, int b)
-                                 { results.emplace_back("sub5:" + std::to_string(a) + "," + std::to_string(b)); }, tbd::any, 69);
+    auto sub4 = pubsub.Subscribe(
+        [&results](int a, int b) { results.emplace_back("sub4:" + std::to_string(a) + "," + std::to_string(b)); }, 42);
+    auto sub5 = pubsub.Subscribe(
+        [&results](int a, int b) { results.emplace_back("sub5:" + std::to_string(a) + "," + std::to_string(b)); },
+        tbd::any,
+        69);
 
     pubsub.Publish(41);
     pubsub.Publish(42);
@@ -125,8 +130,8 @@ TEST(PubSub, BasicTest)
 
     sub4 = nullptr;
     pubsub.Publish(42, 69);
-    std::vector<std::string> expected{"sub1:42", "sub2:42", "sub3:42", "sub5:42,69", "sub4:42,69", "sub5:42,69"};
-    ASSERT_EQ(expected , results);
+    std::vector<std::string> expected{ "sub1:42", "sub2:42", "sub3:42", "sub5:42,69", "sub4:42,69", "sub5:42,69" };
+    ASSERT_EQ(expected, results);
 }
 
 TEST(PubSub, TextParameter)
@@ -134,17 +139,23 @@ TEST(PubSub, TextParameter)
     tbd::PubSub pubsub{};
 
     std::vector<std::string> results{};
-    auto anchor = pubsub.Subscribe([&results](int a, const char *text)
-                                   { results.emplace_back("1:" + std::to_string(a) + "," + text); }, 42).Final();
+    auto anchor =
+        pubsub
+            .Subscribe(
+                [&results](int a, const char* text) { results.emplace_back("1:" + std::to_string(a) + "," + text); },
+                42)
+            .Final();
 
-    auto anchor2 = pubsub.Subscribe([&results](int a, const char *text)
-                                    { results.emplace_back("2:" + std::to_string(a) + "," + text); }, tbd::any, std::string{"second"});
+    auto anchor2 = pubsub.Subscribe(
+        [&results](int a, const char* text) { results.emplace_back("2:" + std::to_string(a) + "," + text); },
+        tbd::any,
+        std::string{ "second" });
 
     pubsub.Publish(42, "first");
 
     pubsub.Publish(42, "second");
 
-    std::vector<std::string> expected{"1:42,first", "2:42,second", "1:42,second"};
+    std::vector<std::string> expected{ "1:42,first", "2:42,second", "1:42,second" };
     ASSERT_EQ(expected, results);
 }
 
@@ -156,14 +167,21 @@ TEST(PubSub, Recursion)
     ASSERT_FALSE(subAnchor);
     std::vector<std::string> results{};
     auto anchor = pubsub.MakeAnchor();
-    anchor.Add([&pubsub, &subAnchor, &results](int a)
-                                   { if (!subAnchor) {
-                                    subAnchor.Add([term = subAnchor.GetTerminator(), &results](int b)
-                                                                  {
-                                                                        results.emplace_back("sub:" + std::to_string(b));
-                                                                        term.Terminate(); },
-                                                                  69); } },
-                                   42);
+    anchor.Add(
+        [&pubsub, &subAnchor, &results](int a)
+        {
+            if (!subAnchor)
+            {
+                subAnchor.Add(
+                    [term = subAnchor.GetTerminator(), &results](int b)
+                    {
+                        results.emplace_back("sub:" + std::to_string(b));
+                        term.Terminate();
+                    },
+                    69);
+            }
+        },
+        42);
     ASSERT_TRUE(anchor);
     pubsub.Publish(69);
     ASSERT_TRUE(results.empty());
@@ -171,7 +189,7 @@ TEST(PubSub, Recursion)
     ASSERT_TRUE(results.empty());
     ASSERT_TRUE(subAnchor);
     pubsub.Publish(69);
-    std::vector<std::string> expected{"sub:69"};
+    std::vector<std::string> expected{ "sub:69" };
     ASSERT_EQ(expected, results);
     results.clear();
     pubsub.Publish(69);
@@ -189,28 +207,41 @@ TEST(PubSub, Recursion)
 
 TEST(PubSub, AnchorSync)
 {
-    std::latch started{2U};
-    std::latch release{1U};
-    std::latch release2{1U};
+    std::latch started{ 2U };
+    std::latch release{ 1U };
+    std::latch release2{ 1U };
     tbd::PubSub pubsub{};
     std::promise<void> p{};
     auto f = p.get_future();
-    auto anchor = pubsub.Subscribe([&started, &release](int)
-                                   { started.count_down(); release.wait(); }, 42);
-    anchor.Add([&started, &release2](int)
-                     { started.count_down(); release2.wait(); }, 43);
+    auto anchor = pubsub.Subscribe(
+        [&started, &release](int)
+        {
+            started.count_down();
+            release.wait();
+        },
+        42);
+    anchor.Add(
+        [&started, &release2](int)
+        {
+            started.count_down();
+            release2.wait();
+        },
+        43);
 
-    std::thread thr1{[&pubsub]{
-        pubsub.Publish(42); // blocks on callback
-    }};
-    std::thread thr2{[&pubsub]{
-        pubsub.Publish(43); // blocks on callback
-    }};
-    std::thread thr3{[&anchor, &started, &p]{
-        started.wait();
-        anchor = nullptr; // will wait because callback is active
-        p.set_value();
-    }};
+    std::thread thr1{ [&pubsub]
+                      {
+                          pubsub.Publish(42); // blocks on callback
+                      } };
+    std::thread thr2{ [&pubsub]
+                      {
+                          pubsub.Publish(43); // blocks on callback
+                      } };
+    std::thread thr3{ [&anchor, &started, &p]
+                      {
+                          started.wait();
+                          anchor = nullptr; // will wait because callback is active
+                          p.set_value();
+                      } };
 
     ASSERT_EQ(std::future_status::timeout, f.wait_for(shortDelay));
     release.count_down(); // callback may exit
@@ -235,12 +266,16 @@ TEST(PubSub, Precision)
 
     for (unsigned int i = 0U; i < 50U; ++i)
     {
-        anchors.emplace_back(pubsub.Subscribe([i,&triggerValue, &triggerCount] (unsigned int value) {
-            if (i == value) {
-                triggerValue = value;
-                ++triggerCount;
-            }
-        }, i));
+        anchors.emplace_back(pubsub.Subscribe(
+            [i, &triggerValue, &triggerCount](unsigned int value)
+            {
+                if (i == value)
+                {
+                    triggerValue = value;
+                    ++triggerCount;
+                }
+            },
+            i));
     }
 
     pubsub.Publish(42U);
@@ -250,10 +285,10 @@ TEST(PubSub, Precision)
 
 TEST(PubSub, ComparisonModifiers)
 {
-    ASSERT_TRUE(show<tbd::GE<int>>({9, 99}, 11, 9, 11));
-    ASSERT_TRUE(show<tbd::GT<int>>({9, 13}, 11, 9, 10));
-    ASSERT_TRUE(show<tbd::LE<int>>({9, 13}, 11, 11, 13));
-    ASSERT_TRUE(show<tbd::LT<int>>({9, 13}, 11, 12, 13));
+    ASSERT_TRUE(show<tbd::GE<int>>({ 9, 99 }, 11, 9, 11));
+    ASSERT_TRUE(show<tbd::GT<int>>({ 9, 13 }, 11, 9, 10));
+    ASSERT_TRUE(show<tbd::LE<int>>({ 9, 13 }, 11, 11, 13));
+    ASSERT_TRUE(show<tbd::LT<int>>({ 9, 13 }, 11, 12, 13));
 }
 
 TEST(PubSub, ExpireOnTime)
@@ -269,10 +304,9 @@ TEST(PubSub, ExpireOnTime)
     tbd::PubSub::Anchor anchor;
     auto now = std::chrono::steady_clock::now();
 
-    anchor = pubsub.Subscribe([&anchor](std::chrono::steady_clock::time_point)
-                              { anchor = nullptr; }, tbd::GE(now + 10s))
-                 .Subscribe([&latest](int v)
-                            { latest = v; });
+    anchor =
+        pubsub.Subscribe([&anchor](std::chrono::steady_clock::time_point) { anchor = nullptr; }, tbd::GE(now + 10s))
+            .Subscribe([&latest](int v) { latest = v; });
     pubsub(1);
     ASSERT_EQ(1, latest);
     pubsub.Publish(now);
@@ -308,17 +342,17 @@ TEST(PubSub, CopyCount)
 
     Copied::Content x{};
 
-    auto anchor = pubsub.Subscribe([](const Copied& c) { });
-    pubsub(Copied{x});
+    auto anchor = pubsub.Subscribe([](const Copied& c) {});
+    pubsub(Copied{ x });
     ASSERT_EQ(0U, x.c);
     ASSERT_EQ(0U, x.m);
 
-    anchor = pubsub.Subscribe([](const Copied& c) {}, Copied{x});
+    anchor = pubsub.Subscribe([](const Copied& c) {}, Copied{ x });
     ASSERT_EQ(0U, x.c);
     ASSERT_EQ(1U, x.m);
 }
 
-template <class Rep, class Period>
+template<class Rep, class Period>
 constexpr size_t OperationsPerSecond(size_t iterations, std::chrono::duration<Rep, Period> elapsed)
 {
     return iterations * Period::den / (elapsed.count() * Period::num /* * Rep */);
@@ -327,23 +361,24 @@ constexpr size_t OperationsPerSecond(size_t iterations, std::chrono::duration<Re
 class Measure
 {
     size_t iterations{};
-    std::chrono::high_resolution_clock::time_point start{std::chrono::high_resolution_clock::now()};
+    std::chrono::high_resolution_clock::time_point start{ std::chrono::high_resolution_clock::now() };
     std::chrono::high_resolution_clock::time_point end{};
+
 public:
-    explicit Measure(size_t i) : iterations{i} {}
+    explicit Measure(size_t i) : iterations{ i } {}
     void Stop() { end = std::chrono::high_resolution_clock::now(); }
-    template <typename Stream, typename = typename Stream::char_type>
+    template<typename Stream, typename = typename Stream::char_type>
     friend Stream& operator<<(Stream& stream, const Measure& m)
     {
         auto end = m.end.time_since_epoch().count() ? m.end : std::chrono::high_resolution_clock::now();
         auto ops = OperationsPerSecond(m.iterations, end - m.start);
         if (ops >= 1'000'000)
         {
-            stream << ops/ 1'000'000.0 << " mops";
+            stream << ops / 1'000'000.0 << " mops";
         }
         else if (ops >= 1'000)
         {
-            stream << ops/ 1'000.0 << " kops";
+            stream << ops / 1'000.0 << " kops";
         }
         else
         {
@@ -359,7 +394,7 @@ TEST(PubSub, PerfNoSubscription)
     constexpr auto iterations = 1'000'000UL;
     using T = std::remove_const_t<decltype(iterations)>;
 
-    Measure m{iterations};
+    Measure m{ iterations };
     for (T i{}; i < iterations; ++i)
     {
         pubsub.Publish(i);
@@ -370,11 +405,11 @@ TEST(PubSub, PerfNoSubscription)
 TEST(PubSub, PerfOneSubscriptionNoMatch)
 {
     tbd::PubSub pubsub;
-    auto anchor = pubsub.Subscribe([](int){}, 42);
+    auto anchor = pubsub.Subscribe([](int) {}, 42);
     constexpr auto iterations = 1'000'000UL;
     using T = std::remove_const_t<decltype(iterations)>;
 
-    Measure m{iterations};
+    Measure m{ iterations };
     for (T i{}; i < iterations; ++i)
     {
         pubsub.Publish(69);
@@ -385,11 +420,11 @@ TEST(PubSub, PerfOneSubscriptionNoMatch)
 TEST(PubSub, PerfOneSubscriptionMatch)
 {
     tbd::PubSub pubsub;
-    auto anchor = pubsub.Subscribe([](int){}, 42);
+    auto anchor = pubsub.Subscribe([](int) {}, 42);
     constexpr auto iterations = 1'000'000UL;
     using T = std::remove_const_t<decltype(iterations)>;
 
-    Measure m{iterations};
+    Measure m{ iterations };
     for (T i{}; i < iterations; ++i)
     {
         pubsub.Publish(42);
@@ -404,12 +439,12 @@ TEST(PubSub, PerfOneKSubscriptionNoMatch)
     constexpr auto subs = 1'000;
     tbd::PubSub pubsub;
     std::deque<tbd::PubSub::Anchor> anchors{};
-    for (std::remove_const_t<decltype(subs)> i{}; i < subs ; ++i)
+    for (std::remove_const_t<decltype(subs)> i{}; i < subs; ++i)
     {
-        anchors.push_back(pubsub.Subscribe([](int i){std::cerr << "MATCH! " << i << "\n";}, i));
+        anchors.push_back(pubsub.Subscribe([](int i) { std::cerr << "MATCH! " << i << "\n"; }, i));
     }
 
-    Measure m{iterations};
+    Measure m{ iterations };
     for (std::remove_const_t<decltype(iterations)> i{}; i < iterations; ++i)
     {
         pubsub.Publish(static_cast<int>(1042));
@@ -425,14 +460,14 @@ TEST(PubSub, PerfOneKSubscriptionMatch)
     tbd::PubSub pubsub;
     std::deque<tbd::PubSub::Anchor> anchors{};
     Measure s(subs);
-    for (std::remove_const_t<decltype(subs)> i{}; i < subs ; ++i)
+    for (std::remove_const_t<decltype(subs)> i{}; i < subs; ++i)
     {
-        anchors.push_back(pubsub.Subscribe([](int){}, i));
+        anchors.push_back(pubsub.Subscribe([](int) {}, i));
     }
     s.Stop();
     std::cerr << "1k subscription rate: " << s << "\n";
 
-    Measure m{iterations};
+    Measure m{ iterations };
     for (std::remove_const_t<decltype(iterations)> i{}; i < iterations; ++i)
     {
         pubsub.Publish(static_cast<int>(i));
@@ -441,43 +476,61 @@ TEST(PubSub, PerfOneKSubscriptionMatch)
     std::cerr << "1k subscription match perf: " << m << "\n";
 }
 
-enum class Op {
+enum class Op
+{
     ProcessStart, // pid, path
-    FileOpen, // pid, fd, how, path
-    FileClose, // pid, fd
-    ProcessEnd, // pid
-    FileDelete, // pid, path
+    FileOpen,     // pid, fd, how, path
+    FileClose,    // pid, fd
+    ProcessEnd,   // pid
+    FileDelete,   // pid, path
 };
 
-enum class Suspicious {
+enum class Suspicious
+{
     FileCreated, // path
 };
 
-enum class How {
-    Read=1,
-    Write=2,
-    Exec=4,
+enum class How
+{
+    Read = 1,
+    Write = 2,
+    Exec = 4,
 };
-How &operator|=(How &lhs, How rhs)
+How& operator|=(How& lhs, How rhs)
 {
-    lhs = static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) | static_cast<std::underlying_type_t<How>>(rhs));
+    lhs =
+        static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) | static_cast<std::underlying_type_t<How>>(rhs));
     return lhs;
 }
-How &operator&=(How &lhs, How rhs)
+How& operator&=(How& lhs, How rhs)
 {
-    lhs = static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) & static_cast<std::underlying_type_t<How>>(rhs));
+    lhs =
+        static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) & static_cast<std::underlying_type_t<How>>(rhs));
     return lhs;
 }
-How &operator^=(How &lhs, How rhs)
+How& operator^=(How& lhs, How rhs)
 {
-    lhs = static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) ^ static_cast<std::underlying_type_t<How>>(rhs));
+    lhs =
+        static_cast<How>(static_cast<std::underlying_type_t<How>>(lhs) ^ static_cast<std::underlying_type_t<How>>(rhs));
     return lhs;
 }
-How operator|(How lhs, How rhs) { lhs |= rhs; return lhs; }
-How operator&(How lhs, How rhs) { lhs &= rhs; return lhs; }
-How operator^(How lhs, How rhs) { lhs ^= rhs; return lhs; }
+How operator|(How lhs, How rhs)
+{
+    lhs |= rhs;
+    return lhs;
+}
+How operator&(How lhs, How rhs)
+{
+    lhs &= rhs;
+    return lhs;
+}
+How operator^(How lhs, How rhs)
+{
+    lhs ^= rhs;
+    return lhs;
+}
 
-template <class Stream, typename = typename Stream::char_type>
+template<class Stream, typename = typename Stream::char_type>
 Stream& operator<<(Stream& stream, How h)
 {
     const char* comma = "";
@@ -499,10 +552,14 @@ Stream& operator<<(Stream& stream, How h)
     return stream;
 }
 
-void SimSub(const tbd::PubSub& pubsub, const char* procName = "/procName", const char* fileName = "/fileName", std::function<void()> payload = nullptr)
+void SimSub(
+    const tbd::PubSub& pubsub,
+    const char* procName = "/procName",
+    const char* fileName = "/fileName",
+    std::function<void()> payload = nullptr)
 {
-    constexpr pid_t pid{1234};
-    constexpr int fd{42};
+    constexpr pid_t pid{ 1234 };
+    constexpr int fd{ 42 };
     pubsub(Op::ProcessStart, pid, procName);
     pubsub(Op::FileOpen, pid, fd, How::Write, fileName);
     pubsub(Op::FileClose, pid, fd);
@@ -516,25 +573,35 @@ void SimSub(const tbd::PubSub& pubsub, const char* procName = "/procName", const
 tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
 {
     auto anchor = pubsub.MakeAnchor();
-    anchor.Add([pubsub, anchors = std::vector<tbd::PubSub::Anchor>()](Op, pid_t pid, int fd, How how, const char *filePath) mutable {
-        // a file has been opened
-        if ((how & How::Write) == How::Write)
+    anchor.Add(
+        [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, int fd, How how, const char* filePath) mutable
         {
-            auto anchor = pubsub.MakeAnchor();
-            anchor.Add([pubsub, filePath, term = anchor.GetTerminator()](Op, pid_t, int)
-                       {
-                pubsub(Suspicious::FileCreated, filePath);
-                term.Terminate(); }, Op::FileClose, pid);
-            anchor.Add([term = anchor.GetTerminator()](Op, pid_t)
-                       {
-                        term.Terminate(); }, Op::ProcessEnd, pid);
-            anchors.push_back(std::move(anchor));
-        }
-    }, Op::FileOpen, pid);
-    anchor.Add([term = anchor.GetTerminator()](Op, pid_t)
-               {
-                // if the process ends, we stop watching for file operations on this pid
-                term.Terminate(); }, Op::ProcessEnd, pid);
+            // a file has been opened
+            if ((how & How::Write) == How::Write)
+            {
+                auto anchor = pubsub.MakeAnchor();
+                anchor.Add(
+                    [pubsub, filePath, term = anchor.GetTerminator()](Op, pid_t, int)
+                    {
+                        pubsub(Suspicious::FileCreated, filePath);
+                        term.Terminate();
+                    },
+                    Op::FileClose,
+                    pid);
+                anchor.Add([term = anchor.GetTerminator()](Op, pid_t) { term.Terminate(); }, Op::ProcessEnd, pid);
+                anchors.push_back(std::move(anchor));
+            }
+        },
+        Op::FileOpen,
+        pid);
+    anchor.Add(
+        [term = anchor.GetTerminator()](Op, pid_t)
+        {
+            // if the process ends, we stop watching for file operations on this pid
+            term.Terminate();
+        },
+        Op::ProcessEnd,
+        pid);
     return anchor;
 }
 
@@ -542,18 +609,30 @@ TEST(PubSub, Example)
 {
     tbd::PubSub pubsub{};
     auto anchor = pubsub.MakeAnchor();
-    anchor.Add([pubsub, anchors= std::vector<tbd::PubSub::Anchor>()](Op, pid_t pid, const char* path) mutable {
-        // Process has started
-        anchors.push_back(processStarted(pubsub, pid));
-    }, Op::ProcessStart);
+    anchor.Add(
+        [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, const char* path) mutable
+        {
+            // Process has started
+            anchors.push_back(processStarted(pubsub, pid));
+        },
+        Op::ProcessStart);
     unsigned int hitCount{};
-    anchor.Add([pubsub, &hitCount, anchors = std::vector<tbd::PubSub::Anchor>{}](Suspicious, const char *path) mutable
-               { 
-               auto anchor = pubsub.Subscribe([&hitCount](Op, pid_t pid, const char* path) {
-                ++hitCount;
-               }, Op::ProcessStart, tbd::any, std::string{"/maliciousFile"});
-               anchor.Add([term = anchor.GetTerminator()](Op, pid_t, const char* path) {term.Terminate(); }, Op::FileDelete, tbd::any, path);
-               anchors.push_back(std::move(anchor)); }, Suspicious::FileCreated);
+    anchor.Add(
+        [pubsub, &hitCount, anchors = pubsub.MakeAnchorage()](Suspicious, const char* path) mutable
+        {
+            auto anchor = pubsub.Subscribe(
+                [&hitCount](Op, pid_t pid, const char* path) { ++hitCount; },
+                Op::ProcessStart,
+                tbd::any,
+                std::string{ "/maliciousFile" });
+            anchor.Add(
+                [term = anchor.GetTerminator()](Op, pid_t, const char* path) { term.Terminate(); },
+                Op::FileDelete,
+                tbd::any,
+                path);
+            anchors.push_back(std::move(anchor));
+        },
+        Suspicious::FileCreated);
 
     SimSub(pubsub, "/procName", "/maliciousFile");
     ASSERT_EQ(0U, hitCount);
