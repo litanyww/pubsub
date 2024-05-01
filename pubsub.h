@@ -19,6 +19,7 @@
 
 namespace tbd
 {
+    /** @brief class which always matches anything */
     class Any_t
     {
     public:
@@ -45,95 +46,98 @@ namespace tbd
     };
     constexpr static Any_t any;
 
-    template<class T>
-    struct ArgToTuple
+    namespace helpers
     {
-        using Type = const std::remove_const_t<T>&;
-    };
-    template<class T>
-    struct ArgToTuple<T*>
-    {
-        using Type = T*;
-    };
-
-    template<class T>
-    struct ArgToTuple<T&>
-    {
-        using Type = T&;
-    };
-
-    template<typename Type>
-    using ArgToTuple_t = const ArgToTuple<std::decay_t<Type>>::Type;
-
-    template<typename... Args>
-    using ArgsToTuple = std::tuple<ArgToTuple_t<Args>...>;
-
-    template<typename NewType, typename PA, typename... TA>
-    constexpr auto Extend(TA&&... args)
-    {
-        if constexpr (sizeof...(TA) < std::tuple_size<PA>())
+        template<class T>
+        struct ArgToTuple
         {
-            return Extend<NewType, PA>(std::forward<TA>(args)..., NewType{});
-        }
-        else
+            using Type = const std::remove_const_t<T>&;
+        };
+        template<class T>
+        struct ArgToTuple<T*>
         {
-            return std::tuple<TA...>(std::forward<TA>(args)...);
-        }
-    }
+            using Type = T*;
+        };
 
-    template<typename NewType, typename PA, typename... Args>
-    using ExtendType = decltype(Extend<NewType, PA>(std::declval<Args>()...));
-
-    template<typename Tup, typename... Args>
-    constexpr Tup ExtendTuple(Args&&... args)
-    {
-        if constexpr (sizeof...(Args) < std::tuple_size<Tup>())
+        template<class T>
+        struct ArgToTuple<T&>
         {
-            return ExtendTuple<Tup>(
-                std::forward<Args>(args)..., decltype(std::get<sizeof...(Args)>(std::declval<Tup>())){});
-        }
-        else
+            using Type = T&;
+        };
+
+        template<typename Type>
+        using ArgToTuple_t = const ArgToTuple<std::decay_t<Type>>::Type;
+
+        template<typename... Args>
+        using ArgsToTuple = std::tuple<ArgToTuple_t<Args>...>;
+
+        template<typename NewType, typename PA, typename... TA>
+        constexpr auto Extend(TA&&... args)
         {
-            return Tup{ std::forward<Args>(args)... };
+            if constexpr (sizeof...(TA) < std::tuple_size<PA>())
+            {
+                return Extend<NewType, PA>(std::forward<TA>(args)..., NewType{});
+            }
+            else
+            {
+                return std::tuple<TA...>(std::forward<TA>(args)...);
+            }
         }
-    }
-    template<typename Signature>
-    class MemberDecode;
 
-    template<typename Res, typename Class, typename... ArgTypes>
-    class MemberDecode<Res (Class::*)(ArgTypes...) const>
-    {
-    public:
-        using RetType = Res;
-        using TupleType = ArgsToTuple<ArgTypes...>;
-    };
-    template<typename Res, typename Class, typename... ArgTypes>
-    class MemberDecode<Res (Class::*)(ArgTypes...)>
-    {
-    public:
-        using RetType = Res;
-        using TupleType = ArgsToTuple<ArgTypes...>;
-    };
+        template<typename NewType, typename PA, typename... Args>
+        using ExtendType = decltype(Extend<NewType, PA>(std::declval<Args>()...));
 
-    // template <typename Lambda> using GetRet = typename MemberDecode<decltype(&Lambda::operator())>::RetType;
+        template<typename Tup, typename... Args>
+        constexpr Tup ExtendTuple(Args&&... args)
+        {
+            if constexpr (sizeof...(Args) < std::tuple_size<Tup>())
+            {
+                return ExtendTuple<Tup>(
+                    std::forward<Args>(args)..., decltype(std::get<sizeof...(Args)>(std::declval<Tup>())){});
+            }
+            else
+            {
+                return Tup{ std::forward<Args>(args)... };
+            }
+        }
+        template<typename Signature>
+        class MemberDecode;
 
-    template<typename Lambda>
-    struct GetTuple
-    {
-        using Type = typename MemberDecode<decltype(&Lambda::operator())>::TupleType;
-    };
+        template<typename Res, typename Class, typename... ArgTypes>
+        class MemberDecode<Res (Class::*)(ArgTypes...) const>
+        {
+        public:
+            using RetType = Res;
+            using TupleType = ArgsToTuple<ArgTypes...>;
+        };
+        template<typename Res, typename Class, typename... ArgTypes>
+        class MemberDecode<Res (Class::*)(ArgTypes...)>
+        {
+        public:
+            using RetType = Res;
+            using TupleType = ArgsToTuple<ArgTypes...>;
+        };
 
-    template<typename... Args>
-    struct GetTuple<void (*)(Args...)>
-    {
-        using Type = ArgsToTuple<Args...>;
-    };
+        // template <typename Lambda> using GetRet = typename MemberDecode<decltype(&Lambda::operator())>::RetType;
 
-    template<typename Lambda>
-    using GetTuple_t = GetTuple<Lambda>::Type;
+        template<typename Lambda>
+        struct GetTuple
+        {
+            using Type = typename MemberDecode<decltype(&Lambda::operator())>::TupleType;
+        };
 
-    template<typename Lambda, typename... Args>
-    using SelType = ExtendType<Any_t, GetTuple_t<Lambda>, const std::decay_t<Args>...>;
+        template<typename... Args>
+        struct GetTuple<void (*)(Args...)>
+        {
+            using Type = ArgsToTuple<Args...>;
+        };
+
+        template<typename Lambda>
+        using GetTuple_t = GetTuple<Lambda>::Type;
+
+        template<typename Lambda, typename... Args>
+        using SelType = ExtendType<Any_t, GetTuple_t<Lambda>, const std::decay_t<Args>...>;
+    } // namespace helpers
 
     class PubSub
     {
@@ -337,7 +341,7 @@ namespace tbd
                 }
                 auto guard = data_->GetLock();
 
-                auto sel = std::make_unique<Select<Func, SelType<Func, Args...>>>(
+                auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
                     std::move(func), std::forward<Args>(args)...);
 
                 data_->AddElement(guard, linker_, std::move(sel));
@@ -350,7 +354,7 @@ namespace tbd
         template<typename Func, typename SelectType>
         class Select : public ElementBase
         {
-            using TupleType = GetTuple_t<Func>;
+            using TupleType = helpers::GetTuple_t<Func>;
             static inline constexpr std::size_t CallArgCount = std::tuple_size<TupleType>();
 
             SelectType sel_; // the select type is a common size, the func is not.
@@ -390,13 +394,14 @@ namespace tbd
 
             template<typename Lambda, typename... Args>
             explicit Select(Lambda&& func, Args&&... args) :
-                sel_{ ExtendTuple<SelType<Lambda, Args...>>(std::forward<Args>(args)...) }, func_{ std::move(func) }
+                sel_{ helpers::ExtendTuple<helpers::SelType<Lambda, Args...>>(std::forward<Args>(args)...) },
+                func_{ std::move(func) }
             {
             }
         };
 
         template<typename Lambda, typename... Args>
-        Select(Lambda f, Args&&... a) -> Select<Lambda, SelType<Lambda, Args...>>;
+        Select(Lambda f, Args&&... a) -> Select<Lambda, helpers::SelType<Lambda, Args...>>;
 
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
         using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
@@ -465,7 +470,7 @@ namespace tbd
         template<typename... Args>
         void Publish(Args&&... args) const
         {
-            ArgsToTuple<Args...> argTuple{ args... };
+            helpers::ArgsToTuple<Args...> argTuple{ args... };
 
             // unlock
             for (auto weak : data_->GetMatches(argTuple))
@@ -493,8 +498,8 @@ namespace tbd
             auto linker = std::make_shared<Linker>();
             auto guard = data_->GetLock();
 
-            auto sel =
-                std::make_unique<Select<Func, SelType<Func, Args...>>>(std::move(func), std::forward<Args>(args)...);
+            auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
+                std::move(func), std::forward<Args>(args)...);
 
             data_->AddElement(guard, linker, std::move(sel));
 
