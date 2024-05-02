@@ -489,7 +489,8 @@ enum class Op
 
 enum class Suspicious
 {
-    FileCreated, // path
+    Mark, // Sus, path - Mark path as suspicious
+    Start, // Sus, pid, path - Indicate that an executable started on a tainted executable
 };
 
 enum class How
@@ -558,11 +559,11 @@ using pid_t = int;
 
 void SimSub(
     const tbd::PubSub& pubsub,
+    pid_t pid = 1234,
     const char* procName = "/procName",
     const char* fileName = "/fileName",
     std::function<void()> payload = nullptr)
 {
-    constexpr pid_t pid{ 1234 };
     constexpr int fd{ 42 };
     pubsub(Op::ProcessStart, pid, procName);
     pubsub(Op::FileOpen, pid, fd, How::Write, fileName);
@@ -588,7 +589,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
                 anchor.Add(
                     [pubsub, filePath, term = anchor.GetTerminator()](Op, pid_t, int)
                     {
-                        pubsub(Suspicious::FileCreated, filePath);
+                        pubsub(Suspicious::Mark, filePath);
                         term.Terminate();
                     },
                     Op::FileClose,
@@ -613,42 +614,57 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
 TEST(PubSub, Example)
 {
     tbd::PubSub pubsub{};
-    auto anchor = pubsub.MakeAnchor();
-    anchor.Add(
-        [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, const char* path) mutable
+    auto susRule = pubsub.MakeAnchor();
+
+    susRule.Add(
+        [pubsub, anchors = pubsub.MakeAnchorage()](Suspicious, const char* path) mutable
         {
-            static_cast<void>(path);
-            // Process has started
-            anchors.push_back(processStarted(pubsub, pid));
-        },
-        Op::ProcessStart);
-    unsigned int hitCount{};
-    anchor.Add(
-        [pubsub, &hitCount, anchors = pubsub.MakeAnchorage()](Suspicious, const char* path) mutable
-        {
-            static_cast<void>(path);
+            // std::cerr << "tainted executable marked: " << path << "\n";
             auto anchor = pubsub.Subscribe(
-                [&hitCount](Op, pid_t, const char*) { ++hitCount; },
+                [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, const char* path) mutable
+                {
+                    // std::cerr << "tainted executable started: " << path << "\n";
+                    pubsub(Suspicious::Start, pid, path);
+                    anchors.push_back(processStarted(pubsub, pid));
+                },
                 Op::ProcessStart,
                 tbd::any,
-                std::string{ "/maliciousFile" });
+                std::string{ path });
             anchor.Add(
-                [term = anchor.GetTerminator()](Op, pid_t, const char*) { term.Terminate(); },
+                [pubsub, term = anchor.GetTerminator()](Op, pid_t, const char* path)
+                {
+                    static_cast<void>(path);
+                    // std::cerr << "tainted executable deleted: " << path << "\n";
+                    term.Terminate();
+                },
                 Op::FileDelete,
                 tbd::any,
-                std::string{path});
-            anchors.push_back(std::move(anchor));
+                std::string{ path });
+            anchors.emplace_back(std::move(anchor));
         },
-        Suspicious::FileCreated);
+        Suspicious::Mark);
 
-    SimSub(pubsub, "/procName", "/maliciousFile");
-    ASSERT_EQ(0U, hitCount);
-    pubsub(Op::ProcessStart, static_cast<pid_t>(1024), "/maliciousFile");
-    ASSERT_EQ(1U, hitCount);
-    pubsub(Op::ProcessStart, static_cast<pid_t>(1025), "/maliciousFile");
-    ASSERT_EQ(2U, hitCount);
-    hitCount = 0U; // after delete, no more hits
-    pubsub(Op::FileDelete, static_cast<pid_t>(1026), "/maliciousFile");
-    pubsub(Op::ProcessStart, static_cast<pid_t>(1027), "/maliciousFile");
-    ASSERT_EQ(0U, hitCount);
+    unsigned int hitCount{};
+    auto checker =
+        pubsub.Subscribe([&hitCount](Suspicious, pid_t, const char* path) mutable { ++hitCount; }, Suspicious::Start);
+
+    SimSub(pubsub, 1024, "/notTained", "/taintedFile");
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1025), "/taintedFile");
+    ASSERT_EQ(0U, hitCount) << "nothing marked as suspicious yet";
+
+    pubsub(Suspicious::Mark, "/maliciousFile");
+    ASSERT_EQ(0U, hitCount) << "file not tainted yet";
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1026), "/taintedFile");
+    ASSERT_EQ(0U, hitCount) << "file not tainted yet";
+
+    SimSub(pubsub, 1027, "/maliciousFile", "/taintedFile"); // tainting
+    ASSERT_EQ(1U, std::exchange(hitCount, 0U)) << "a tainted file was started, and tainted another";
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1028), "/taintedFile");
+    ASSERT_EQ(1U, std::exchange(hitCount, 0U)) << "Executable now marked as tainted";
+
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1029), "/taintedFile");
+    ASSERT_EQ(1U, std::exchange(hitCount, 0U)) << "Still tainted";
+    pubsub(Op::FileDelete, static_cast<pid_t>(1030), "/taintedFile");
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1031), "/taintedFile");
+    ASSERT_EQ(0U, hitCount) << "File no longer tainted";
 }
