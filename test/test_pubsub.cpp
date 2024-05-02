@@ -100,6 +100,89 @@ namespace
         friend auto operator<=>(const Copied& lhs, const Copied& rhs) { return lhs.x_ <=> rhs.x_; }
         // clang-format on
     };
+
+    template<class Rep, class Period>
+    constexpr size_t OperationsPerSecond(size_t iterations, std::chrono::duration<Rep, Period> elapsed)
+    {
+        return iterations * Period::den / (elapsed.count() * Period::num /* * Rep */);
+    }
+
+    class Measure
+    {
+        size_t iterations{};
+        std::chrono::high_resolution_clock::time_point start{ std::chrono::high_resolution_clock::now() };
+        std::chrono::high_resolution_clock::time_point end{};
+
+    public:
+        explicit Measure(size_t i) : iterations{ i } {}
+        void Stop() { end = std::chrono::high_resolution_clock::now(); }
+        template<typename Stream, typename = typename Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const Measure& m)
+        {
+            auto end = m.end.time_since_epoch().count() ? m.end : std::chrono::high_resolution_clock::now();
+            auto ops = OperationsPerSecond(m.iterations, end - m.start);
+            if (ops >= 1'000'000)
+            {
+                stream << ops / 1'000'000.0 << " mops";
+            }
+            else if (ops >= 1'000)
+            {
+                stream << ops / 1'000.0 << " kops";
+            }
+            else
+            {
+                stream << ops << " ops";
+            }
+            return stream;
+        }
+    };
+
+    class Perf
+    {
+        size_t iterations{};
+        std::chrono::high_resolution_clock::time_point start{ std::chrono::high_resolution_clock::now() };
+        std::chrono::high_resolution_clock::time_point end{};
+
+    public:
+        Perf() : end{ start + std::chrono::milliseconds{ 50 } } {}
+
+        template<class Rep, class Period>
+        explicit Perf(std::chrono::duration<Rep, Period> duration) : end{ start + duration }
+        {
+        }
+
+        bool operator()()
+        {
+            ++iterations;
+            auto now = std::chrono::high_resolution_clock::now();
+            if (now > end)
+            {
+                end = now;
+                return false;
+            }
+            return true;
+        }
+
+        template<typename Stream, typename = typename Stream::char_type>
+        friend Stream& operator<<(Stream& stream, const Perf& m)
+        {
+            auto ops = OperationsPerSecond(m.iterations, m.end - m.start);
+            if (ops >= 1'000'000)
+            {
+                stream << ops / 1'000'000.0 << " mops";
+            }
+            else if (ops >= 1'000)
+            {
+                stream << ops / 1'000.0 << " kops";
+            }
+            else
+            {
+                stream << ops << " ops";
+            }
+            return stream;
+        }
+    };
+
 } // namespace
 
 TEST(PubSub, BasicTest)
@@ -354,54 +437,18 @@ TEST(PubSub, CopyCount)
     ASSERT_EQ(1U, x.m);
 }
 
-template<class Rep, class Period>
-constexpr size_t OperationsPerSecond(size_t iterations, std::chrono::duration<Rep, Period> elapsed)
-{
-    return iterations * Period::den / (elapsed.count() * Period::num /* * Rep */);
-}
-
-class Measure
-{
-    size_t iterations{};
-    std::chrono::high_resolution_clock::time_point start{ std::chrono::high_resolution_clock::now() };
-    std::chrono::high_resolution_clock::time_point end{};
-
-public:
-    explicit Measure(size_t i) : iterations{ i } {}
-    void Stop() { end = std::chrono::high_resolution_clock::now(); }
-    template<typename Stream, typename = typename Stream::char_type>
-    friend Stream& operator<<(Stream& stream, const Measure& m)
-    {
-        auto end = m.end.time_since_epoch().count() ? m.end : std::chrono::high_resolution_clock::now();
-        auto ops = OperationsPerSecond(m.iterations, end - m.start);
-        if (ops >= 1'000'000)
-        {
-            stream << ops / 1'000'000.0 << " mops";
-        }
-        else if (ops >= 1'000)
-        {
-            stream << ops / 1'000.0 << " kops";
-        }
-        else
-        {
-            stream << ops << " ops";
-        }
-        return stream;
-    }
-};
-
 TEST(PubSub, PerfNoSubscription)
 {
     tbd::PubSub pubsub;
     constexpr auto iterations = 1'000'000UL;
     using T = std::remove_const_t<decltype(iterations)>;
 
-    Measure m{ iterations };
-    for (T i{}; i < iterations; ++i)
+    Perf m{};
+    unsigned int i = 0;
+    while (m())
     {
-        pubsub.Publish(i);
+        pubsub.Publish(++i);
     }
-    m.Stop();
     std::cerr << "no subscription perf: " << m << "\n";
 }
 TEST(PubSub, PerfOneSubscriptionNoMatch)
@@ -411,12 +458,11 @@ TEST(PubSub, PerfOneSubscriptionNoMatch)
     constexpr auto iterations = 1'000'000UL;
     using T = std::remove_const_t<decltype(iterations)>;
 
-    Measure m{ iterations };
-    for (T i{}; i < iterations; ++i)
+    Perf m{};
+    while (m())
     {
         pubsub.Publish(69);
     }
-    m.Stop();
     std::cerr << "one subscription no match perf: " << m << "\n";
 }
 TEST(PubSub, PerfOneSubscriptionMatch)
