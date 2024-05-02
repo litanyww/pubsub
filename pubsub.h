@@ -16,6 +16,7 @@
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
+#include <vector>
 
 namespace tbd
 {
@@ -196,18 +197,21 @@ namespace tbd
             std::mutex activeLock_{};
             std::shared_mutex sharedLock_{};
             std::set<std::thread::id> active_{};
+            std::weak_ptr<Data> data_{};
 
         public:
+            Linker(std::weak_ptr<Data> data) : data_{ std::move(data) } {}
+            ~Linker() { Destroy(); }
+            Linker(Linker&&) = delete;
+
             void Remember(GroupSelector& selectors, GroupSelector::iterator it)
             {
                 entries_.emplace_back(&selectors, it);
             }
             explicit operator bool() const { return !entries_.empty(); }
             size_t size() const { return entries_.size(); }
-            ~Linker() { Destroy(); }
             void Destroy()
             {
-                auto entries = std::move(entries_);
                 {
                     std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
                     if (auto it = active_.find(std::this_thread::get_id()); it != active_.end())
@@ -216,11 +220,22 @@ namespace tbd
                         sharedLock_.unlock_shared();
                     }
                 }
-                std::scoped_lock<std::shared_mutex> guard{ sharedLock_ };
-
-                for (auto [selectors, it] : entries)
+                decltype(entries_) entries{ entries_};
                 {
-                    selectors->erase(it);
+                    std::scoped_lock<std::shared_mutex> guard{ sharedLock_ };
+                    entries = std::move(entries_);
+                }
+
+                if (auto data = data_.lock())
+                {
+                    std::vector<GroupSelector::node_type> nodes{};
+                    nodes.reserve(entries.size());
+                    auto guard = data->GetLock();
+                    for (auto [selectors, it] : entries)
+                    {
+                        nodes.emplace_back(selectors->extract(it));
+                    }
+                    // nodes are destroyed after lock released
                 }
             }
             bool Mark()
@@ -341,12 +356,11 @@ namespace tbd
                 {
                     throw std::runtime_error{ "Invalid anchor" };
                 }
-                auto guard = data_->GetLock();
 
                 auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
                     std::move(func), std::forward<Args>(args)...);
 
-                data_->AddElement(guard, linker_, std::move(sel));
+                data_->AddElement(linker_, std::move(sel));
 
                 return *this;
             }
@@ -421,8 +435,9 @@ namespace tbd
             explicit Data(std::ostream& debugStream) : debugStream_{ &debugStream } {}
             ScopedLock GetLock() { return ScopedLock{ lock_ }; }
 
-            void AddElement(ScopedLock&, std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
+            void AddElement(std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
             {
+                ScopedLock guard{ lock_ };
                 auto argType = base->ArgumentType();
                 auto& perPrototype = database_[base->ArgumentType()];
                 auto& selectorSet = perPrototype[base->SelectArgs()];
@@ -497,18 +512,17 @@ namespace tbd
         template<typename Func, typename... Args>
         [[nodiscard]] ActiveAnchor Subscribe(Func func, Args&&... args)
         {
-            auto linker = std::make_shared<Linker>();
-            auto guard = data_->GetLock();
+            auto linker = std::make_shared<Linker>(data_);
 
             auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
                 std::move(func), std::forward<Args>(args)...);
 
-            data_->AddElement(guard, linker, std::move(sel));
+            data_->AddElement(linker, std::move(sel));
 
             return { data_, std::move(linker) };
         }
 
-        [[nodiscard]] ActiveAnchor MakeAnchor() { return { data_, std::make_shared<Linker>() }; }
+        [[nodiscard]] ActiveAnchor MakeAnchor() { return { data_, std::make_shared<Linker>(data_) }; }
 
         /** @brief Return a container in which to drop anchors
          * @return an empty container for anchors
