@@ -23,6 +23,7 @@ namespace tbd
     class Any_t
     {
     public:
+        // clang-format off
         friend constexpr auto operator<=>(const Any_t&, const Any_t&) = default;
 
         template<typename Other>
@@ -30,6 +31,7 @@ namespace tbd
         {
             return other <=> other;
         }
+        // clang-format on
 
         template<typename Other>
         friend constexpr bool operator==(const Any_t&, const Other& other)
@@ -66,7 +68,7 @@ namespace tbd
         };
 
         template<typename Type>
-        using ArgToTuple_t = const ArgToTuple<std::decay_t<Type>>::Type;
+        using ArgToTuple_t = const typename ArgToTuple<std::decay_t<Type>>::Type;
 
         template<typename... Args>
         using ArgsToTuple = std::tuple<ArgToTuple_t<Args>...>;
@@ -419,7 +421,7 @@ namespace tbd
             explicit Data(std::ostream& debugStream) : debugStream_{ &debugStream } {}
             ScopedLock GetLock() { return ScopedLock{ lock_ }; }
 
-            void AddElement(ScopedLock& guard, std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
+            void AddElement(ScopedLock&, std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
             {
                 auto argType = base->ArgumentType();
                 auto& perPrototype = database_[base->ArgumentType()];

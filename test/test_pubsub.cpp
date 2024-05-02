@@ -96,7 +96,9 @@ namespace
         }
         unsigned int GetCopyCount() const { return x_ ? x_->c : 0U; }
         unsigned int GetMoveCount() const { return x_ ? x_->m : 0U; }
+        // clang-format off
         friend auto operator<=>(const Copied& lhs, const Copied& rhs) { return lhs.x_ <=> rhs.x_; }
+        // clang-format on
     };
 } // namespace
 
@@ -111,15 +113,15 @@ TEST(PubSub, BasicTest)
         << Demangle(typeid(foo.ArgumentType()));
     ASSERT_EQ(typeid(std::tuple<const int, const char* const, Any_t, Any_t>), foo.SelectArgs());
 
-    std::vector<std::string> results{};
-    auto sub1 = pubsub.Subscribe([&results](int v) { results.emplace_back("sub1:" + std::to_string(v)); }, 42);
-    auto sub2 = pubsub.Subscribe([&results](int v) { results.emplace_back("sub2:" + std::to_string(v)); }, 42);
-    auto sub3 = pubsub.Subscribe([&results](int v) { results.emplace_back("sub3:" + std::to_string(v)); }, 42);
+    std::multiset<std::string> results{};
+    auto sub1 = pubsub.Subscribe([&results](int v) { results.insert("sub1:" + std::to_string(v)); }, 42);
+    auto sub2 = pubsub.Subscribe([&results](int v) { results.insert("sub2:" + std::to_string(v)); }, 42);
+    auto sub3 = pubsub.Subscribe([&results](int v) { results.insert("sub3:" + std::to_string(v)); }, 42);
 
     auto sub4 = pubsub.Subscribe(
-        [&results](int a, int b) { results.emplace_back("sub4:" + std::to_string(a) + "," + std::to_string(b)); }, 42);
+        [&results](int a, int b) { results.insert("sub4:" + std::to_string(a) + "," + std::to_string(b)); }, 42);
     auto sub5 = pubsub.Subscribe(
-        [&results](int a, int b) { results.emplace_back("sub5:" + std::to_string(a) + "," + std::to_string(b)); },
+        [&results](int a, int b) { results.insert("sub5:" + std::to_string(a) + "," + std::to_string(b)); },
         tbd::any,
         69);
 
@@ -130,7 +132,7 @@ TEST(PubSub, BasicTest)
 
     sub4 = nullptr;
     pubsub.Publish(42, 69);
-    std::vector<std::string> expected{ "sub1:42", "sub2:42", "sub3:42", "sub5:42,69", "sub4:42,69", "sub5:42,69" };
+    std::multiset<std::string> expected{ "sub1:42", "sub2:42", "sub3:42", "sub5:42,69", "sub4:42,69", "sub5:42,69" };
     ASSERT_EQ(expected, results);
 }
 
@@ -168,7 +170,7 @@ TEST(PubSub, Recursion)
     std::vector<std::string> results{};
     auto anchor = pubsub.MakeAnchor();
     anchor.Add(
-        [&pubsub, &subAnchor, &results](int a)
+        [&pubsub, &subAnchor, &results](int)
         {
             if (!subAnchor)
             {
@@ -342,12 +344,12 @@ TEST(PubSub, CopyCount)
 
     Copied::Content x{};
 
-    auto anchor = pubsub.Subscribe([](const Copied& c) {});
+    auto anchor = pubsub.Subscribe([](const Copied&) {});
     pubsub(Copied{ x });
     ASSERT_EQ(0U, x.c);
     ASSERT_EQ(0U, x.m);
 
-    anchor = pubsub.Subscribe([](const Copied& c) {}, Copied{ x });
+    anchor = pubsub.Subscribe([](const Copied&) {}, Copied{ x });
     ASSERT_EQ(0U, x.c);
     ASSERT_EQ(1U, x.m);
 }
@@ -552,6 +554,8 @@ Stream& operator<<(Stream& stream, How h)
     return stream;
 }
 
+using pid_t = int;
+
 void SimSub(
     const tbd::PubSub& pubsub,
     const char* procName = "/procName",
@@ -576,6 +580,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
     anchor.Add(
         [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, int fd, How how, const char* filePath) mutable
         {
+            static_cast<void>(fd);
             // a file has been opened
             if ((how & How::Write) == How::Write)
             {
@@ -612,6 +617,7 @@ TEST(PubSub, Example)
     anchor.Add(
         [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, const char* path) mutable
         {
+            static_cast<void>(path);
             // Process has started
             anchors.push_back(processStarted(pubsub, pid));
         },
@@ -620,16 +626,17 @@ TEST(PubSub, Example)
     anchor.Add(
         [pubsub, &hitCount, anchors = pubsub.MakeAnchorage()](Suspicious, const char* path) mutable
         {
+            static_cast<void>(path);
             auto anchor = pubsub.Subscribe(
-                [&hitCount](Op, pid_t pid, const char* path) { ++hitCount; },
+                [&hitCount](Op, pid_t, const char*) { ++hitCount; },
                 Op::ProcessStart,
                 tbd::any,
                 std::string{ "/maliciousFile" });
             anchor.Add(
-                [term = anchor.GetTerminator()](Op, pid_t, const char* path) { term.Terminate(); },
+                [term = anchor.GetTerminator()](Op, pid_t, const char*) { term.Terminate(); },
                 Op::FileDelete,
                 tbd::any,
-                path);
+                std::string{path});
             anchors.push_back(std::move(anchor));
         },
         Suspicious::FileCreated);
