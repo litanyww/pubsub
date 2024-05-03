@@ -223,3 +223,45 @@ TEST(Perf, MaxThreads)
     std::chrono::high_resolution_clock::time_point end{ std::chrono::high_resolution_clock::now() };
     std::cerr << threadCount << " threads: " << "totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
 }
+
+TEST(Perf, ThreadedSubscriptions)
+{
+    // This isn't so much about testing performance, but testing that we can do this from multiple threads - we're
+    // testing concurrency.
+    // For each iteration, we register a new subscription, we call it, and we destroy it, and we have four threads doing
+    // this concurrently.
+    std::atomic_uint64_t totalIterations;
+    tbd::PubSub pubsub{};
+    bool done{false};
+    auto anchor = pubsub.Subscribe([](uint64_t) {}, 42ULL);
+
+    auto func = [pubsub, &done, &totalIterations]() mutable {
+        uint64_t iterations{};
+        while (!done)
+        {
+            ++iterations;
+            bool hit{false};
+            auto a = pubsub.Subscribe([&hit](std::thread::id, uint64_t) {hit = true;}, std::this_thread::get_id(), iterations);
+            pubsub(std::this_thread::get_id(), iterations);
+            ASSERT_TRUE(hit);
+        }
+        totalIterations += iterations;
+    };
+
+    std::chrono::high_resolution_clock::time_point start{};
+    auto threadCount = std::min(4U, std::thread::hardware_concurrency());
+    {
+        std::vector<Thr> threads{};
+        threads.reserve(threadCount);
+
+        start = std::chrono::high_resolution_clock::now();
+        for (unsigned int i = 0; i < threadCount; ++i)
+        {
+            threads.emplace_back(func);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        done = true;
+    }
+    std::chrono::high_resolution_clock::time_point end{ std::chrono::high_resolution_clock::now() };
+    std::cerr << threadCount << " threads: " << "totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
+}
