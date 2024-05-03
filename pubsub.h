@@ -210,6 +210,7 @@ namespace tbd
             }
             explicit operator bool() const { return !entries_.empty(); }
             size_t size() const { return entries_.size(); }
+            std::weak_ptr<Data> GetData() { return data_; }
             void Destroy()
             {
                 {
@@ -325,46 +326,32 @@ namespace tbd
             explicit operator bool() const { return linker_ && *linker_; }
             size_t size() const { return linker_ ? linker_->size() : 0UL; }
             Term GetTerminator() const { return Term{ linker_ }; }
-        };
 
-        class ActiveAnchor : public Anchor
-        {
-            std::shared_ptr<Data> data_{};
-
-        public:
-            ActiveAnchor(std::shared_ptr<Data> data, std::shared_ptr<Linker> linker) :
-                Anchor{ std::move(linker) }, data_{ std::move(data) }
-            {
-            }
             template<typename Func, typename... Args>
-            [[nodiscard]] ActiveAnchor Subscribe(Func func, Args&&... args)
+            [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
             {
                 Add(std::move(func), std::forward<Args>(args)...);
-                return ActiveAnchor{ std::move(data_), std::move(linker_) };
-            }
-
-            ActiveAnchor& operator=(std::nullptr_t)
-            {
-                auto tmp = std::move(*this);
-                return *this;
+                return Anchor{ std::move(linker_) };
             }
 
             template<typename Func, typename... Args>
-            ActiveAnchor& Add(Func func, Args&&... args)
+            Anchor& Add(Func func, Args&&... args)
             {
                 if (!linker_)
                 {
                     throw std::runtime_error{ "Invalid anchor" };
                 }
 
-                auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
-                    std::move(func), std::forward<Args>(args)...);
+                if (auto data = linker_->GetData().lock())
+                {
+                    auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
+                        std::move(func), std::forward<Args>(args)...);
 
-                data_->AddElement(linker_, std::move(sel));
+                    data->AddElement(linker_, std::move(sel));
+                }
 
                 return *this;
             }
-            Anchor Final() { return Anchor{ std::move(linker_) }; }
         };
 
         template<typename Func, typename SelectType>
@@ -510,7 +497,7 @@ namespace tbd
         }
 
         template<typename Func, typename... Args>
-        [[nodiscard]] ActiveAnchor Subscribe(Func func, Args&&... args)
+        [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
         {
             auto linker = std::make_shared<Linker>(data_);
 
@@ -519,10 +506,10 @@ namespace tbd
 
             data_->AddElement(linker, std::move(sel));
 
-            return { data_, std::move(linker) };
+            return Anchor{ std::move(linker) };
         }
 
-        [[nodiscard]] ActiveAnchor MakeAnchor() { return { data_, std::make_shared<Linker>(data_) }; }
+        [[nodiscard]] Anchor MakeAnchor() { return Anchor{ std::make_shared<Linker>(data_) }; }
 
         /** @brief Return a container in which to drop anchors
          * @return an empty container for anchors

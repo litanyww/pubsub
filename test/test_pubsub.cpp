@@ -228,8 +228,7 @@ TEST(PubSub, TextParameter)
         pubsub
             .Subscribe(
                 [&results](int a, const char* text) { results.emplace_back("1:" + std::to_string(a) + "," + text); },
-                42)
-            .Final();
+                42);
 
     auto anchor2 = pubsub.Subscribe(
         [&results](int a, const char* text) { results.emplace_back("2:" + std::to_string(a) + "," + text); },
