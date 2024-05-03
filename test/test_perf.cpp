@@ -14,11 +14,38 @@
 
 namespace
 {
-    template<class Rep, class Period>
-    constexpr size_t OperationsPerSecond(size_t iterations, std::chrono::duration<Rep, Period> elapsed)
+    template <class Rep, class Period>
+    class OperationsPerSecond
     {
-        return iterations * Period::den / (elapsed.count() * Period::num /* * Rep */);
-    }
+        size_t iterations_{};
+        std::chrono::duration<Rep, Period> duration_{};
+
+        template<typename Stream>
+        requires requires { typename Stream::char_type; }
+        friend Stream& operator<<(Stream& stream, const OperationsPerSecond& o)
+        {
+            auto ops = o.iterations_ * Period::den / (o.duration_.count() * Period::num);
+            if (ops >= 1'000'000)
+            {
+                stream << ops / 1'000'000.0 << " mops";
+            }
+            else if (ops >= 1'000)
+            {
+                stream << ops / 1'000.0 << " kops";
+            }
+            else
+            {
+                stream << ops << " ops";
+            }
+            return stream;
+        }
+
+    public:
+        OperationsPerSecond(size_t iterations, std::chrono::duration<Rep, Period> duration) :
+            iterations_{ iterations }, duration_{ duration }
+        {
+        }
+    };
 
     class Measure
     {
@@ -33,19 +60,7 @@ namespace
         friend Stream& operator<<(Stream& stream, const Measure& m)
         {
             auto end = m.end.time_since_epoch().count() ? m.end : std::chrono::high_resolution_clock::now();
-            auto ops = OperationsPerSecond(m.iterations, end - m.start);
-            if (ops >= 1'000'000)
-            {
-                stream << ops / 1'000'000.0 << " mops";
-            }
-            else if (ops >= 1'000)
-            {
-                stream << ops / 1'000.0 << " kops";
-            }
-            else
-            {
-                stream << ops << " ops";
-            }
+            stream << OperationsPerSecond(m.iterations, end - m.start);
             return stream;
         }
     };
@@ -79,19 +94,7 @@ namespace
         template<typename Stream, typename = typename Stream::char_type>
         friend Stream& operator<<(Stream& stream, const Perf& m)
         {
-            auto ops = OperationsPerSecond(m.iterations, m.end - m.start);
-            if (ops >= 1'000'000)
-            {
-                stream << ops / 1'000'000.0 << " mops";
-            }
-            else if (ops >= 1'000)
-            {
-                stream << ops / 1'000.0 << " kops";
-            }
-            else
-            {
-                stream << ops << " ops";
-            }
+            stream << OperationsPerSecond(m.iterations, m.end - m.start);
             return stream;
         }
     };
@@ -174,4 +177,49 @@ TEST(Perf, OneKSubscriptionMatch)
         pubsub.Publish(++i);
     }
     std::cerr << "1k subscription match perf: " << m << "\n";
+}
+
+class Thr
+{
+    std::thread thread_{};
+public:
+    Thr(std::function<void()> func) : thread_{std::move(func)} {}
+    ~Thr() { thread_.join(); }
+    Thr(Thr&&) = default;
+    Thr& operator=(Thr&&) = default;
+};
+
+TEST(Perf, MaxThreads)
+{
+    std::atomic_uint64_t totalIterations;
+    tbd::PubSub pubsub{};
+    bool done{false};
+    auto anchor = pubsub.Subscribe([](uint64_t) {}, 42ULL);
+
+    auto func = [pubsub, &done, &totalIterations] {
+        uint64_t iterations{};
+        while (!done)
+        {
+            ++iterations;
+            pubsub(iterations);
+        }
+        totalIterations += iterations;
+    };
+
+    std::chrono::high_resolution_clock::time_point start{};
+    auto threadCount = std::min(4U, std::thread::hardware_concurrency());
+    {
+        std::vector<Thr> threads{};
+        threads.reserve(threadCount);
+
+        start = std::chrono::high_resolution_clock::now();
+        for (unsigned int i = 0; i < threadCount; ++i)
+        {
+            threads.emplace_back(func);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        done = true;
+    }
+    std::chrono::high_resolution_clock::time_point end{ std::chrono::high_resolution_clock::now() };
+    std::cerr << threadCount << " threads: " << "totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
 }
