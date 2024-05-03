@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <deque>
 #include <iostream>
-#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -241,11 +240,14 @@ namespace tbd
             }
             bool Mark()
             {
-                std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
-                std::pair<std::set<std::thread::id>::iterator, bool> p = active_.emplace(std::this_thread::get_id());
-                if (!p.second)
                 {
-                    return false;
+                    std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
+                    std::pair<std::set<std::thread::id>::iterator, bool> p =
+                        active_.emplace(std::this_thread::get_id());
+                    if (!p.second)
+                    {
+                        return false;
+                    }
                 }
                 sharedLock_.lock_shared();
                 return true;
@@ -253,11 +255,14 @@ namespace tbd
 
             void Unmark()
             {
-                std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
-                if (active_.erase(std::this_thread::get_id()) > 0)
                 {
-                    sharedLock_.unlock_shared();
+                    std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
+                    if (active_.erase(std::this_thread::get_id()) == 0)
+                    {
+                        return;
+                    }
                 }
+                sharedLock_.unlock_shared();
             }
 
             class Guard

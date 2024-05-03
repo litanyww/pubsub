@@ -180,7 +180,7 @@ TEST(EventAnalysis, Example)
 
     unsigned int hitCount{};
     auto checker =
-        pubsub.Subscribe([&hitCount](Suspicious, pid_t, const char* path) mutable { ++hitCount; }, Suspicious::Start);
+        pubsub.Subscribe([&hitCount](Suspicious, pid_t, const char*) mutable { ++hitCount; }, Suspicious::Start);
 
     SimSub(pubsub, 1024, "/notTained", "/taintedFile");
     pubsub(Op::ProcessStart, static_cast<pid_t>(1025), "/taintedFile");

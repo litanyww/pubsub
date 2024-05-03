@@ -6,7 +6,9 @@
 #include <iostream>
 #include <memory>
 
+#ifdef __GNUG__
 #include <cxxabi.h>
+#endif
 
 class Demangle
 {
