@@ -454,8 +454,6 @@ TEST(PubSub, PerfOneSubscriptionNoMatch)
 {
     tbd::PubSub pubsub;
     auto anchor = pubsub.Subscribe([](int) {}, 42);
-    constexpr auto iterations = 1'000'000UL;
-    using T = std::remove_const_t<decltype(iterations)>;
 
     Perf m{};
     while (m())
@@ -468,21 +466,17 @@ TEST(PubSub, PerfOneSubscriptionMatch)
 {
     tbd::PubSub pubsub;
     auto anchor = pubsub.Subscribe([](int) {}, 42);
-    constexpr auto iterations = 1'000'000UL;
-    using T = std::remove_const_t<decltype(iterations)>;
 
-    Measure m{ iterations };
-    for (T i{}; i < iterations; ++i)
+    Perf m{  };
+    while(m())
     {
         pubsub.Publish(42);
     }
-    m.Stop();
     std::cerr << "one subscription match perf: " << m << "\n";
 }
 
 TEST(PubSub, PerfOneKSubscriptionNoMatch)
 {
-    constexpr auto iterations = 1'000'000UL;
     constexpr auto subs = 1'000;
     tbd::PubSub pubsub;
     std::deque<tbd::PubSub::Anchor> anchors{};
@@ -491,18 +485,16 @@ TEST(PubSub, PerfOneKSubscriptionNoMatch)
         anchors.push_back(pubsub.Subscribe([](int i) { std::cerr << "MATCH! " << i << "\n"; }, i));
     }
 
-    Measure m{ iterations };
-    for (std::remove_const_t<decltype(iterations)> i{}; i < iterations; ++i)
+    Perf m{ };
+    while (m())
     {
         pubsub.Publish(static_cast<int>(1042));
     }
-    m.Stop();
     std::cerr << "1k subscription no match perf: " << m << "\n";
 }
 
 TEST(PubSub, PerfOneKSubscriptionMatch)
 {
-    constexpr auto iterations = 1'000'000UL;
     constexpr auto subs = 1'000;
     tbd::PubSub pubsub;
     std::deque<tbd::PubSub::Anchor> anchors{};
@@ -514,12 +506,12 @@ TEST(PubSub, PerfOneKSubscriptionMatch)
     s.Stop();
     std::cerr << "1k subscription rate: " << s << "\n";
 
-    Measure m{ iterations };
-    for (std::remove_const_t<decltype(iterations)> i{}; i < iterations; ++i)
+    Perf m{ };
+    int i{};
+    while (m())
     {
-        pubsub.Publish(static_cast<int>(i));
+        pubsub.Publish(++i);
     }
-    m.Stop();
     std::cerr << "1k subscription match perf: " << m << "\n";
 }
 
