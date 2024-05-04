@@ -15,6 +15,7 @@
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace tbd
@@ -287,6 +288,130 @@ namespace tbd
             static Guard Protect(std::shared_ptr<Linker> linker) { return Guard{ std::move(linker) }; }
         };
 
+        template <class Type>
+        class MatchResults
+        {
+            size_t size_{};
+            union
+            {
+                Type short_[1];
+                std::deque<Type> long_;
+            };
+            using Short = decltype(short_);
+            using Long = decltype(long_);
+
+            constexpr inline static size_t maxShort = sizeof(short_) / sizeof(short_[0]);
+
+        public:
+            MatchResults() {}
+            MatchResults(MatchResults&& donor) noexcept : size_{ donor.size_ }
+            {
+                if (size_ <= maxShort)
+                {
+                    for (size_t i = 0 ; i < size_ ; ++i)
+                    {
+                        new (&short_[i]) Type {std::move(donor.short_[i])};
+                        donor.short_[i].~Type();
+                    }
+                }
+                else
+                {
+                    new (&long_) Long{std::move(donor.long_)};
+                    donor.long_.~Long();
+                }
+            }
+            ~MatchResults()
+            {
+                if (size_ <= maxShort)
+                {
+                    for (size_t i = 0 ; i < size_; ++i)
+                    {
+                        short_[i].~Type();
+                    }
+                }
+                else
+                {
+                    long_.~Long();
+                }
+            }
+            void push_back(Type t)
+            {
+                if (size_ < maxShort)
+                {
+                    new (&short_[size_++]) Type{ std::move(t) };
+                }
+                else if (size_ == maxShort)
+                {
+                    ++size_;
+                    std::deque<Type> d{};
+                    for (auto& x : short_)
+                    {
+                        d.push_back(std::move(x));
+                        x.~Type();
+                    }
+                    d.push_back(std::move(t));
+                    new (&long_) Long{ std::move(d) };
+                }
+                else {
+                    ++size_;
+                    long_.push_back(std::move(t));
+                }
+            }
+            class const_iterator
+            {
+                friend class MatchResults;
+                using ItShort = const Type*;
+                using ItLong = typename MatchResults::Long::const_iterator;
+                using ItType = std::variant<ItShort, ItLong>;
+
+                ItType iterator_{ItShort{}};
+
+                const_iterator(ItType it) : iterator_{it} {}
+            public:
+                const_iterator() {}
+                // clang-format off
+                friend auto operator<=>(const const_iterator& lhs, const const_iterator& rhs) = default;
+                // clang-format on
+                const_iterator& operator++()
+                {
+                    std::visit([](auto&& it) { ++it; }, iterator_);
+                    return *this;
+                }
+                const Type& operator*() const
+                {
+                    // return std::visit([](auto&& it) { return *it; }, iterator_);
+                    if (std::holds_alternative<ItShort>(iterator_))
+                    {
+                        return *std::get<ItShort>(iterator_);
+                    }
+                    else
+                    {
+                        return *std::get<ItLong>(iterator_);
+                    }
+                }
+            };
+            const_iterator begin() const {
+                using ItType = const_iterator::ItType;
+                return const_iterator{size_ <= maxShort ? ItType{std::begin(short_)} : ItType{std::begin(long_)}};
+            }
+            const_iterator end() const {
+                using ItType = const_iterator::ItType;
+                return const_iterator{size_ <= maxShort ? ItType{std::begin(short_) + size_} : ItType{std::end(long_)}};
+            }
+        };
+
+        /** Simpler, non-movable variant of std::shared_lock<> */
+        template <class Lock>
+        class SharedGuard
+        {
+            Lock& lock_{};
+        public:
+            SharedGuard(Lock& lock) : lock_{lock} { lock.lock_shared(); }
+            ~SharedGuard() { lock_.unlock_shared(); }
+            SharedGuard(SharedGuard&&) = delete;
+        };
+
+
         class Term
         {
             std::weak_ptr<Linker> linker_{};
@@ -443,10 +568,10 @@ namespace tbd
             }
 
             template<typename Type>
-            std::deque<std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
+            MatchResults<std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
             {
-                std::deque<std::weak_ptr<ElementBase>> winners{};
-                std::shared_lock<std::shared_mutex> guard{ lock_ };
+                MatchResults<std::weak_ptr<ElementBase>> winners{};
+                SharedGuard<std::shared_mutex> guard{ lock_ };
                 if (auto perPrototypeIt = database_.find(std::type_index{ typeid(decltype(argTuple)) });
                     perPrototypeIt != database_.end())
                 {
