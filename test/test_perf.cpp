@@ -14,6 +14,8 @@
 
 namespace
 {
+    using namespace std::chrono_literals;
+    constexpr auto perfDuration = 50ms;
     template <class Rep, class Period>
     class OperationsPerSecond
     {
@@ -72,7 +74,7 @@ namespace
         std::chrono::high_resolution_clock::time_point end{};
 
     public:
-        Perf() : end{ start + std::chrono::milliseconds{ 50 } } {}
+        Perf() : end{ start + perfDuration } {}
 
         template<class Rep, class Period>
         explicit Perf(std::chrono::duration<Rep, Period> duration) : end{ start + duration }
@@ -103,8 +105,6 @@ namespace
 TEST(Perf, NoSubscription)
 {
     tbd::PubSub pubsub;
-    constexpr auto iterations = 1'000'000UL;
-    using T = std::remove_const_t<decltype(iterations)>;
 
     Perf m{};
     unsigned int i = 0;
@@ -114,29 +114,55 @@ TEST(Perf, NoSubscription)
     }
     std::cerr << "no subscription perf: " << m << "\n";
 }
-TEST(Perf, OneSubscriptionNoMatch)
+TEST(Perf, NoneOfThreeSubscriptionMatch)
 {
     tbd::PubSub pubsub;
-    auto anchor = pubsub.Subscribe([](int) {}, 42);
+    auto anchor = pubsub.Subscribe([](int) {}, 41).Subscribe([](int) {}, 42).Subscribe([](int) {}, 43);
 
     Perf m{};
     while (m())
     {
         pubsub.Publish(69);
     }
-    std::cerr << "one subscription no match perf: " << m << "\n";
+    std::cerr << "Three subscription no match perf: " << m << "\n";
 }
-TEST(Perf, OneSubscriptionMatch)
+TEST(Perf, OneOfThreeSubscriptionMatch)
 {
     tbd::PubSub pubsub;
-    auto anchor = pubsub.Subscribe([](int) {}, 42);
+    auto anchor = pubsub.Subscribe([](int) {}, 41).Subscribe([](int) {}, 42).Subscribe([](int) {}, 43);
 
     Perf m{  };
     while(m())
     {
         pubsub.Publish(42);
     }
-    std::cerr << "one subscription match perf: " << m << "\n";
+    std::cerr << "three subscriptions one match perf: " << m << "\n";
+}
+
+TEST(Perf, TwoOfThreeSubscriptionMatch)
+{
+    tbd::PubSub pubsub;
+    auto anchor = pubsub.Subscribe([](int) {}, 41).Subscribe([](int) {}, 42).Subscribe([](int) {}, 42);
+
+    Perf m{  };
+    while(m())
+    {
+        pubsub.Publish(42);
+    }
+    std::cerr << "three subscriptions two match perf: " << m << "\n";
+}
+
+TEST(Perf, ThreeOfThreeSubscriptionMatch)
+{
+    tbd::PubSub pubsub;
+    auto anchor = pubsub.Subscribe([](int) {}, 42).Subscribe([](int) {}, 42).Subscribe([](int) {}, 42);
+
+    Perf m{  };
+    while(m())
+    {
+        pubsub.Publish(42);
+    }
+    std::cerr << "three subscriptions three match perf: " << m << "\n";
 }
 
 TEST(Perf, OneKSubscriptionNoMatch)
@@ -189,19 +215,19 @@ public:
     Thr& operator=(Thr&&) = default;
 };
 
-TEST(Perf, MaxThreads)
+TEST(Perf, MaxThreadsThreeSubscriptionsNoMatch)
 {
     std::atomic_uint64_t totalIterations;
     tbd::PubSub pubsub{};
     bool done{false};
-    auto anchor = pubsub.Subscribe([](uint64_t) {}, 42ULL);
+    auto anchor = pubsub.Subscribe([](int) {}, 41).Subscribe([](int) {}, 42).Subscribe([](int) {}, 43);
 
     auto func = [pubsub, &done, &totalIterations] {
         uint64_t iterations{};
         while (!done)
         {
             ++iterations;
-            pubsub(iterations);
+            pubsub(69);
         }
         totalIterations += iterations;
     };
@@ -217,11 +243,46 @@ TEST(Perf, MaxThreads)
         {
             threads.emplace_back(func);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(perfDuration);
         done = true;
     }
     std::chrono::high_resolution_clock::time_point end{ std::chrono::high_resolution_clock::now() };
-    std::cerr << threadCount << " threads: " << "totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
+    std::cerr << threadCount << " threads: " << " three subscriptions no match - totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
+}
+
+TEST(Perf, MaxThreadsThreeSubscriptionsOneMatch)
+{
+    std::atomic_uint64_t totalIterations;
+    tbd::PubSub pubsub{};
+    bool done{false};
+    auto anchor = pubsub.Subscribe([](int) {}, 41).Subscribe([](int) {}, 42).Subscribe([](int) {}, 43);
+
+    auto func = [pubsub, &done, &totalIterations] {
+        uint64_t iterations{};
+        while (!done)
+        {
+            ++iterations;
+            pubsub(42);
+        }
+        totalIterations += iterations;
+    };
+
+    std::chrono::high_resolution_clock::time_point start{};
+    auto threadCount = std::min(4U, std::thread::hardware_concurrency());
+    {
+        std::vector<Thr> threads{};
+        threads.reserve(threadCount);
+
+        start = std::chrono::high_resolution_clock::now();
+        for (unsigned int i = 0; i < threadCount; ++i)
+        {
+            threads.emplace_back(func);
+        }
+        std::this_thread::sleep_for(perfDuration);
+        done = true;
+    }
+    std::chrono::high_resolution_clock::time_point end{ std::chrono::high_resolution_clock::now() };
+    std::cerr << threadCount << " threads: " << "three subscriptions one match - totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
 }
 
 TEST(Perf, ThreadedSubscriptions)
