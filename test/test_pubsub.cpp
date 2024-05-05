@@ -293,6 +293,33 @@ TEST(PubSub, ComparisonModifiers)
     ASSERT_TRUE(show<tbd::LT<int>>({ 9, 13 }, 11, 12, 13));
 }
 
+
+TEST(PubSub, BitSelect)
+{
+    using namespace tbd;
+    ASSERT_EQ(BitSelect{5U}, 7U );
+    ASSERT_GT(BitSelect{5U}, 6U );
+    ASSERT_EQ(BitSelect(6U,14U), 7U );
+    ASSERT_LT(BitSelect(6U,14U), 14U );
+    ASSERT_LT(BitSelect(5U,7U), 6U );
+
+    tbd::PubSub pubsub;
+    unsigned int match{};
+    auto anchor = pubsub.Subscribe([&match](unsigned int) { ++match; }, tbd::BitSelect(6, 14));
+
+    pubsub(14);
+    ASSERT_EQ(0, match);
+
+    pubsub(6U);
+    ASSERT_EQ(1, std::exchange(match, 0U));
+    pubsub(7U);
+    ASSERT_EQ(1, std::exchange(match, 0U));
+    pubsub(0x17U);
+    ASSERT_EQ(1, std::exchange(match, 0U));
+
+}
+
+
 TEST(PubSub, ExpireOnTime)
 {
     // One anchor may reference multiple subscriptions, and if one of them is

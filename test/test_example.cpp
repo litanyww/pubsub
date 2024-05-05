@@ -109,6 +109,24 @@ void SimSub(
     pubsub(Op::ProcessEnd, pid);
 }
 
+void SimSubRead(
+    const tbd::PubSub& pubsub,
+    pid_t pid = 1234,
+    const char* procName = "/procName",
+    const char* fileName = "/fileName",
+    std::function<void()> payload = nullptr)
+{
+    constexpr int fd{ 42 };
+    pubsub(Op::ProcessStart, pid, procName);
+    pubsub(Op::FileOpen, pid, fd, How::Read, fileName);
+    pubsub(Op::FileClose, pid, fd);
+    if (payload)
+    {
+        payload();
+    }
+    pubsub(Op::ProcessEnd, pid);
+}
+
 tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
 {
     auto anchor = pubsub.MakeAnchor();
@@ -117,23 +135,22 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
         {
             static_cast<void>(fd);
             // a file has been opened
-            if ((how & How::Write) == How::Write)
-            {
-                auto anchor = pubsub.MakeAnchor();
-                anchor.Add(
-                    [pubsub, filePath, term = anchor.GetTerminator()](Op, pid_t, int)
-                    {
-                        pubsub(Suspicious::Mark, filePath);
-                        term.Terminate();
-                    },
-                    Op::FileClose,
-                    pid);
-                anchor.Add([term = anchor.GetTerminator()](Op, pid_t) { term.Terminate(); }, Op::ProcessEnd, pid);
-                anchors.push_back(std::move(anchor));
-            }
+            auto anchor = pubsub.MakeAnchor();
+            anchor.Add(
+                [pubsub, filePath, term = anchor.GetTerminator()](Op, pid_t, int)
+                {
+                    pubsub(Suspicious::Mark, filePath);
+                    term.Terminate();
+                },
+                Op::FileClose,
+                pid);
+            anchor.Add([term = anchor.GetTerminator()](Op, pid_t) { term.Terminate(); }, Op::ProcessEnd, pid);
+            anchors.push_back(std::move(anchor));
         },
         Op::FileOpen,
-        pid);
+        pid,
+        tbd::any,
+        tbd::BitSelect(How::Write));
     anchor.Add(
         [term = anchor.GetTerminator()](Op, pid_t)
         {
@@ -189,6 +206,12 @@ TEST(EventAnalysis, Example)
     pubsub(Suspicious::Mark, "/maliciousFile");
     ASSERT_EQ(0U, hitCount) << "file not tainted yet";
     pubsub(Op::ProcessStart, static_cast<pid_t>(1026), "/taintedFile");
+    ASSERT_EQ(0U, hitCount) << "file not tainted yet";
+
+
+    SimSubRead(pubsub, 1027, "/maliciousFile", "/taintedFile"); // read, so not tainted
+    ASSERT_EQ(1U, std::exchange(hitCount, 0U)) << "a tainted file was started, but tainted nothing";
+    pubsub(Op::ProcessStart, static_cast<pid_t>(1028), "/taintedFile");
     ASSERT_EQ(0U, hitCount) << "file not tainted yet";
 
     SimSub(pubsub, 1027, "/maliciousFile", "/taintedFile"); // tainting
