@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <chrono>
 #include <deque>
 #include <future>
@@ -14,8 +15,9 @@
 
 namespace
 {
+    std::chrono::milliseconds GetPerfDuration(const char* envName, std::chrono::milliseconds);
     using namespace std::chrono_literals;
-    constexpr auto perfDuration = 50ms;
+    const auto perfDuration = GetPerfDuration("PUBSUBPERFDURATION", 50ms);
     template <class Rep, class Period>
     class OperationsPerSecond
     {
@@ -101,6 +103,17 @@ namespace
         }
     };
 
+    std::chrono::milliseconds GetPerfDuration(const char* envName, std::chrono::milliseconds defaultDuration)
+    {
+        if (const char* durationText = std::getenv(envName))
+        {
+            if (auto milliseconds = std::atol(durationText))
+            {
+                return std::chrono::milliseconds(milliseconds);
+            }
+        }
+        return defaultDuration;
+    }
 }
 TEST(Perf, NoSubscription)
 {
