@@ -380,3 +380,18 @@ TEST(PubSub, CopyCount)
     ASSERT_EQ(0U, x.c);
     ASSERT_EQ(1U, x.m);
 }
+
+TEST(PubSub, RemoveEmptySets)
+{
+    tbd::PubSub pubsub{tbd::removeEmptySets};
+
+    int value{};
+    auto anchor = pubsub.Subscribe([&value](int v) { value = v;});
+
+    pubsub(42);
+    ASSERT_EQ(42, value);
+    anchor = nullptr;
+
+    // There's currently no way to check that all elements in the database have
+    // been removed, though we'll see it with coverage.
+}

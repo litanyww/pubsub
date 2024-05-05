@@ -532,17 +532,27 @@ namespace tbd
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
         using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
 
+        /** Tag for PubSub constructor to force it to remove empty elements from
+         * the subscription database
+         * 
+         * This is generally not recommended, because the number of empty
+         * elements is set at compile time and is unlikely to be significant.
+         */
+        struct RemoveEmptySets{};
+
         class Data
         {
             std::map<std::type_index, PerPrototype> database_{};
             std::shared_mutex lock_{};
             std::ostream* debugStream_{};
+            bool removeEmptySets_{false};
 
             using ScopedLock = std::scoped_lock<std::shared_mutex>;
 
         public:
             Data() {}
             explicit Data(std::ostream& debugStream) : debugStream_{ &debugStream } {}
+            explicit Data(PubSub::RemoveEmptySets) : removeEmptySets_{true} {}
             ScopedLock GetLock() { return ScopedLock{ lock_ }; }
 
             void AddElement(std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
@@ -604,7 +614,7 @@ namespace tbd
                         removeEmpty = true;
                     }
                 }
-                if (removeEmpty)
+                if (removeEmpty && removeEmptySets_)
                 {
                     for (auto ppIt = database_.begin(); ppIt != database_.end();
                          ppIt->second.empty() ? (ppIt = database_.erase(ppIt)) : ++ppIt)
@@ -620,6 +630,7 @@ namespace tbd
         };
 
         PubSub() = default;
+        explicit PubSub(RemoveEmptySets arg) : data_{ std::make_shared<Data>(arg) } {}
         explicit PubSub(std::ostream& debugStream) : data_{ std::make_shared<Data>(debugStream) } {}
 
         template<typename... Args>
@@ -670,6 +681,8 @@ namespace tbd
     private:
         std::shared_ptr<Data> data_{ std::make_shared<Data>() };
     };
+
+    constexpr PubSub::RemoveEmptySets removeEmptySets{};
 
     template<typename Type>
     class LE
