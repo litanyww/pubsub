@@ -229,14 +229,7 @@ namespace tbd
 
                 if (auto data = data_.lock())
                 {
-                    std::vector<GroupSelector::node_type> nodes{};
-                    nodes.reserve(entries.size());
-                    auto guard = data->GetLock();
-                    for (auto [selectors, it] : entries)
-                    {
-                        nodes.emplace_back(selectors->extract(it));
-                    }
-                    // nodes are destroyed after lock released
+                    data->ReleaseNodes(std::move(entries));
                 }
             }
             bool Mark()
@@ -595,6 +588,34 @@ namespace tbd
                     *debugStream_ << "no subscriptions for " << Demangle(typeid(Type)) << "\n";
                 }
                 return winners;
+            }
+
+            void ReleaseNodes(std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries)
+            {
+                std::vector<GroupSelector::node_type> nodes{};
+                nodes.reserve(entries.size());
+                ScopedLock guard{ lock_ };
+                bool removeEmpty{false};
+                for (auto [selectors, it] : entries)
+                {
+                    nodes.emplace_back(selectors->extract(it));
+                    if (selectors->empty())
+                    {
+                        removeEmpty = true;
+                    }
+                }
+                if (removeEmpty)
+                {
+                    for (auto ppIt = database_.begin(); ppIt != database_.end();
+                         ppIt->second.empty() ? (ppIt = database_.erase(ppIt)) : ++ppIt)
+                    {
+                        for (auto it = ppIt->second.begin(); it != ppIt->second.end();
+                             it->second.empty() ? (it = ppIt->second.erase(it)) : ++it)
+                        {
+                        }
+                    }
+                }
+                // nodes are destroyed after lock released
             }
         };
 
