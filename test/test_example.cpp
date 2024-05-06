@@ -134,6 +134,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
         [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, int fd, How how, const char* filePath) mutable
         {
             static_cast<void>(fd);
+            if ((how & How::Write) != How::Write) { return; }
             // a file has been opened
             auto anchor = pubsub.MakeAnchor();
             anchor.Add(
@@ -148,9 +149,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
             anchors.push_back(std::move(anchor));
         },
         Op::FileOpen,
-        pid,
-        tbd::any,
-        tbd::BitSelect(How::Write));
+        pid);
     anchor.Add(
         [term = anchor.GetTerminator()](Op, pid_t)
         {

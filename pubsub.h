@@ -796,32 +796,4 @@ namespace tbd
     };
     template<typename Type>
     GT(Type&&) -> GT<Type>;
-
-    template<class IntType>
-    class BitSelect
-    {
-        IntType mask_;
-        IntType bits_;
-
-        template<typename Stream, typename = typename Stream::char_type>
-        friend Stream& operator<<(Stream& stream, const BitSelect& b)
-        {
-            if (b.mask_ == b.bits_)
-            {
-                stream << "[0" << std::oct << b.bits_ << "]";
-            }
-            else
-            {
-                stream << "[0" << std::oct << b.bits_ << ":0" << b.mask_ << "]";
-            }
-            return stream;
-        }
-
-    public:
-        explicit BitSelect(IntType bits) : mask_{ bits }, bits_{ bits } {}
-        BitSelect(IntType bits, IntType mask) : mask_{ mask }, bits_{ bits } {}
-        friend auto operator<=>(const BitSelect& lhs, const BitSelect& rhs) = default;
-        friend auto operator<=>(const BitSelect& lhs, const IntType& rhs) { return lhs.bits_ <=> (rhs & lhs.mask_); }
-        friend bool operator==(const BitSelect& lhs, const IntType& rhs) { return lhs.bits_ == (rhs & lhs.mask_); }
-    };
 } // namespace tbd
