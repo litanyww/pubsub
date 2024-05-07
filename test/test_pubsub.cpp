@@ -293,6 +293,50 @@ TEST(PubSub, ComparisonModifiers)
     ASSERT_TRUE(show<tbd::LT<int>>({ 9, 13 }, 11, 12, 13));
 }
 
+TEST(PubSub, BitSelect)
+{
+    using namespace tbd;
+    ASSERT_EQ((BitSelect<unsigned, 7U>(5U)), 015U );
+    ASSERT_GT((BitSelect<unsigned, 6U>(4U)), 3U );
+    ASSERT_EQ((BitSelect<unsigned, 016U>{6U}), 7U );
+    ASSERT_LT((BitSelect<unsigned, 016U>{6U}), 016U );
+    ASSERT_LT((BitSelect<unsigned, 7U>{5U}), 6U );
+
+    tbd::PubSub pubsub;
+    unsigned int match{};
+    auto anchor = pubsub.Subscribe([&match](unsigned int) { ++match; }, tbd::BitSelect<unsigned, 016>{6});
+
+    pubsub(14);
+    ASSERT_EQ(0, match);
+
+    pubsub(6U);
+    ASSERT_EQ(1, std::exchange(match, 0U));
+    pubsub(7U);
+    ASSERT_EQ(1, std::exchange(match, 0U));
+    pubsub(0x17U);
+    ASSERT_EQ(1, std::exchange(match, 0U));
+
+    std::multiset<BitSelect<unsigned int, 012>, TCompare> elements;
+    for (auto i = 0U ; i < 040U  ; ++i)
+    {
+        elements.emplace(i);
+    }
+
+    for (auto i = 0U ; i < 040U ; ++i)
+    {
+        auto p = elements.equal_range(i);
+        // std::cerr << "i=" << i;
+        unsigned int count = 0U;
+        for (auto it = p.first; it != p.second; ++it)
+        {
+            ASSERT_EQ(i & 012, static_cast<unsigned int>(*it));
+            ++count;
+            // std::cerr << " " << *it;
+        }
+        ASSERT_EQ(8U, count) << "32 elements and 2 bits must match, we expect 8 hits for every value";
+        // std::cerr << "\n";
+    }
+}
 
 TEST(PubSub, ExpireOnTime)
 {

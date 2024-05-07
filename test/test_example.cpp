@@ -66,6 +66,7 @@ How operator^(How lhs, How rhs)
     lhs ^= rhs;
     return lhs;
 }
+// auto operator<=>(const How& lhs, const How& rhs) { return static_cast<unsigned int>(lhs) <=> static_cast<unsigned int>(rhs); }
 
 template<class Stream, typename = typename Stream::char_type>
 Stream& operator<<(Stream& stream, How h)
@@ -134,7 +135,6 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
         [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, int fd, How how, const char* filePath) mutable
         {
             static_cast<void>(fd);
-            if ((how & How::Write) != How::Write) { return; }
             // a file has been opened
             auto anchor = pubsub.MakeAnchor();
             anchor.Add(
@@ -149,7 +149,9 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
             anchors.push_back(std::move(anchor));
         },
         Op::FileOpen,
-        pid);
+        pid,
+        tbd::any,
+        tbd::BitSelect<How, How::Write>{How::Write});
     anchor.Add(
         [term = anchor.GetTerminator()](Op, pid_t)
         {

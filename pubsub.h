@@ -20,6 +20,12 @@
 
 namespace tbd
 {
+    template<class Stream>
+    concept Streamable = requires(Stream& s) {
+        typename Stream::char_type;
+        { s << "" } -> std::same_as<Stream&>;
+    };
+
     /** @brief class which always matches anything */
     class Any_t
     {
@@ -40,7 +46,7 @@ namespace tbd
             return true;
         }
 
-        template<typename Stream, typename = typename Stream::char_type>
+        template<Streamable Stream>
         friend Stream& operator<<(Stream& stream, const Any_t&)
         {
             stream << "any";
@@ -702,7 +708,7 @@ namespace tbd
         friend bool operator<(const LE& lhs, const Type& rhs) { return lhs.value_ < rhs; }
         friend bool operator<(const Type&, const LE&) { return false; }
 
-        template<typename Stream, typename = typename Stream::char_type>
+        template<Streamable Stream>
         friend Stream& operator<<(Stream& stream, const LE& g)
         {
             stream << "LE<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -731,7 +737,7 @@ namespace tbd
         friend bool operator<(const LT& lhs, const Type& rhs) { return lhs.value_ <= rhs; }
         friend bool operator<(const Type&, const LT&) { return false; }
 
-        template<typename Stream, typename = typename Stream::char_type>
+        template<Streamable Stream>
         friend Stream& operator<<(Stream& stream, const LT& g)
         {
             stream << "LT<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -760,7 +766,7 @@ namespace tbd
         friend bool operator<(const GE&, const Type&) { return false; }
         friend bool operator<(const Type& lhs, const GE& rhs) { return lhs < rhs.value_; }
 
-        template<typename Stream, typename = typename Stream::char_type>
+        template<Streamable Stream>
         friend Stream& operator<<(Stream& stream, const GE& g)
         {
             stream << "GE<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -787,7 +793,7 @@ namespace tbd
         friend bool operator<(const GT& lhs, const GT& rhs) { return lhs.value_ < rhs.value_; }
         friend bool operator<(const GT&, const Type&) { return false; }
         friend bool operator<(const Type& lhs, const GT& rhs) { return lhs <= rhs.value_; }
-        template<typename Stream, typename = typename Stream::char_type>
+        template<Streamable Stream>
         friend Stream& operator<<(Stream& stream, const GT& g)
         {
             stream << "GT<" << typeid(Type).name() << ">{" << g.value_ << "}";
@@ -796,4 +802,53 @@ namespace tbd
     };
     template<typename Type>
     GT(Type&&) -> GT<Type>;
+
+    template <class Type, Type mask>
+    class BitSelect
+    {
+        Type bits_{};
+        friend auto operator<=>(const BitSelect& lhs, const BitSelect& rhs) = default;
+        friend auto operator<=>(const BitSelect& lhs, const Type& rhs) {
+            return lhs.bits_ <=> (rhs & mask);
+        }
+        friend bool operator==(const BitSelect& lhs, const Type& rhs) {
+            return lhs.bits_ == (rhs & mask);
+        }
+
+        class AsOct
+        {
+            Type v;
+
+            template<Streamable Stream>
+            friend Stream& operator<<(Stream& stream, const AsOct& o)
+            {
+                auto flags = stream.flags(std::ios::oct | (stream.flags() & (~std::ios::basefield)));
+                stream << "0" << o.v;
+                stream.flags(flags);
+                return stream;
+            }
+
+        public:
+            AsOct(Type value) : v{ value } {}
+        };
+
+        template<Streamable Stream>
+        friend Stream& operator<<(Stream& stream, const BitSelect& b)
+        {
+            if (b.bits_ == mask)
+            {
+                stream << "<" << AsOct(b.bits_) << ">";
+            }
+            else
+            {
+                stream << "<" << AsOct(mask) << "|" << AsOct(b.bits_) << ">";
+            }
+            return stream;
+        }
+
+    public:
+        BitSelect() = default;
+        explicit BitSelect(Type bits) : bits_{bits & mask} {}
+        operator Type () const { return bits_; }
+    };
 } // namespace tbd
