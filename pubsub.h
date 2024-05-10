@@ -203,6 +203,7 @@ namespace tbd
             std::mutex activeLock_{};
             std::shared_mutex sharedLock_{};
             std::set<std::thread::id> active_{};
+            std::thread::id activeSolo_{};
             std::weak_ptr<Data> data_{};
 
         public:
@@ -221,10 +222,22 @@ namespace tbd
             {
                 {
                     std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
-                    if (auto it = active_.find(std::this_thread::get_id()); it != active_.end())
+                    const auto thisThread = std::this_thread::get_id();
+                    if (active_.empty())
                     {
-                        active_.erase(it);
-                        sharedLock_.unlock_shared();
+                        if (activeSolo_ == thisThread)
+                        {
+                            activeSolo_ = {};
+                            sharedLock_.unlock_shared();
+                        }
+                    }
+                    else
+                    {
+                        if (auto it = active_.find(thisThread); it != active_.end())
+                        {
+                            active_.erase(it);
+                            sharedLock_.unlock_shared();
+                        }
                     }
                 }
                 decltype(entries_) entries{ entries_};
@@ -241,9 +254,30 @@ namespace tbd
             bool Mark()
             {
                 {
+                    const auto thisThread = std::this_thread::get_id();
                     std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
+                    if (active_.empty())
+                    {
+                        if (activeSolo_ == std::thread::id{})
+                        {
+                            activeSolo_ = thisThread;
+                        }
+                        else if (activeSolo_ == thisThread)
+                        {
+                            return false;
+                        }
+                        else
+                        {
+                            active_.emplace(activeSolo_);
+                            active_.emplace(thisThread);
+                            activeSolo_ = {};
+                        }
+                        sharedLock_.lock_shared();
+                        return true;
+                    }
+
                     std::pair<std::set<std::thread::id>::iterator, bool> p =
-                        active_.emplace(std::this_thread::get_id());
+                        active_.emplace(thisThread);
                     if (!p.second)
                     {
                         return false;
@@ -257,7 +291,15 @@ namespace tbd
             {
                 {
                     std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
-                    if (active_.erase(std::this_thread::get_id()) == 0)
+                    if (active_.empty())
+                    {
+                        if (activeSolo_ != std::this_thread::get_id())
+                        {
+                            return;
+                        }
+                        activeSolo_ = {};
+                    }
+                    else if (active_.erase(std::this_thread::get_id()) == 0)
                     {
                         return;
                     }
@@ -832,7 +874,11 @@ namespace tbd
             AsOct(Type value) : v{ value } {}
         };
 
-        template<Streamable Stream>
+        template<class Stream>
+            requires requires(Stream& s) {
+                typename Stream::char_type;
+                { s << "" } -> std::same_as<Stream&>;
+            }
         friend Stream& operator<<(Stream& stream, const BitSelect& b)
         {
             if (b.bits_ == mask)
