@@ -15,6 +15,7 @@
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -202,7 +203,7 @@ namespace tbd
             std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries_{};
             std::mutex activeLock_{};
             std::shared_mutex sharedLock_{};
-            std::set<std::thread::id> active_{};
+            std::unordered_set<std::thread::id> active_{};
             std::thread::id activeSolo_{};
             std::weak_ptr<Data> data_{};
 
@@ -276,8 +277,7 @@ namespace tbd
                         return true;
                     }
 
-                    std::pair<std::set<std::thread::id>::iterator, bool> p =
-                        active_.emplace(thisThread);
+                    auto p = active_.emplace(thisThread);
                     if (!p.second)
                     {
                         return false;
@@ -590,7 +590,7 @@ namespace tbd
 
         class Data
         {
-            std::map<std::type_index, PerPrototype> database_{};
+            std::unordered_map<std::type_index, PerPrototype> database_{};
             std::shared_mutex lock_{};
             std::ostream* debugStream_{};
             bool removeEmptySets_{false};
