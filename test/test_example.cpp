@@ -132,7 +132,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
 {
     auto anchor = pubsub.MakeAnchor();
     anchor.Add(
-        [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, int fd, How how, const char* filePath) mutable
+        [pubsub, anchors = pubsub.MakeAnchorage()](Op, pid_t pid, int fd, How, const char* filePath) mutable
         {
             static_cast<void>(fd);
             // a file has been opened
