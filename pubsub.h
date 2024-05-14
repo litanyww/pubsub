@@ -197,13 +197,16 @@ namespace tbd
 
         /// @brief Elements with the same SelectType share the same set
         using GroupSelector = std::multiset<std::unique_ptr<ElementBase>, ElementBase::Compare>;
+        using ActiveThreads_t = std::unordered_set<std::thread::id>;
+        using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
+        using Database_t = std::unordered_map<std::type_index, PerPrototype>;
 
         class Linker
         {
             std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries_{};
             std::mutex activeLock_{};
             std::shared_mutex sharedLock_{};
-            std::unordered_set<std::thread::id> active_{};
+            ActiveThreads_t active_{};
             std::thread::id activeSolo_{};
             std::weak_ptr<Data> data_{};
 
@@ -578,7 +581,6 @@ namespace tbd
         Select(Lambda f, Args&&... a) -> Select<Lambda, helpers::SelType<Lambda, Args...>>;
 
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
-        using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
 
         /** Tag for PubSub constructor to force it to remove empty elements from
          * the subscription database
@@ -590,7 +592,7 @@ namespace tbd
 
         class Data
         {
-            std::unordered_map<std::type_index, PerPrototype> database_{};
+            Database_t database_{};
             std::shared_mutex lock_{};
             std::ostream* debugStream_{};
             bool removeEmptySets_{false};
