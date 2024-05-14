@@ -298,6 +298,41 @@ TEST(Perf, MaxThreadsThreeSubscriptionsOneMatch)
     std::cerr << threadCount << " threads: " << "three subscriptions one match - totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
 }
 
+TEST(Perf, MaxThreadsThreeSubscriptionsTwoMatch)
+{
+    std::atomic_uint64_t totalIterations;
+    tbd::PubSub pubsub{};
+    bool done{false};
+    auto anchor = pubsub.Subscribe([](int) {}, 41).Subscribe([](int) {}, 42).Subscribe([](int) {}, 42);
+
+    auto func = [pubsub, &done, &totalIterations] {
+        uint64_t iterations{};
+        while (!done)
+        {
+            ++iterations;
+            pubsub(42);
+        }
+        totalIterations += iterations;
+    };
+
+    std::chrono::high_resolution_clock::time_point start{};
+    auto threadCount = std::min(4U, std::thread::hardware_concurrency());
+    {
+        std::vector<Thr> threads{};
+        threads.reserve(threadCount);
+
+        start = std::chrono::high_resolution_clock::now();
+        for (unsigned int i = 0; i < threadCount; ++i)
+        {
+            threads.emplace_back(func);
+        }
+        std::this_thread::sleep_for(perfDuration);
+        done = true;
+    }
+    std::chrono::high_resolution_clock::time_point end{ std::chrono::high_resolution_clock::now() };
+    std::cerr << threadCount << " threads: " << "three subscriptions one match - totalIterations: " << totalIterations << ": " << OperationsPerSecond(totalIterations, end - start) << std::endl;
+}
+
 TEST(Perf, ThreadedSubscriptions)
 {
     // This isn't so much about testing performance, but testing that we can do this from multiple threads - we're
