@@ -151,7 +151,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
         Op::FileOpen,
         pid,
         tbd::any,
-        tbd::BitSelect<How, How::Write>{How::Write});
+        tbd::BitSelect<How, How::Write>{ How::Write });
     anchor.Add(
         [term = anchor.GetTerminator()](Op, pid_t)
         {
