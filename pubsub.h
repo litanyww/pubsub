@@ -16,6 +16,7 @@
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -24,7 +25,7 @@ namespace tbd
     template<class Stream>
     concept Streamable = requires(Stream& s) {
         typename Stream::char_type;
-        { s << "" } -> std::same_as<Stream&>;
+        { s << "" } -> ::std::same_as<Stream&>;
     };
 
     /** @brief class which always matches anything */
@@ -61,7 +62,7 @@ namespace tbd
         template<class T>
         struct ArgToTuple
         {
-            using Type = const std::remove_const_t<T>&;
+            using Type = const ::std::remove_const_t<T>&;
         };
         template<class T>
         struct ArgToTuple<T*>
@@ -76,38 +77,38 @@ namespace tbd
         };
 
         template<typename Type>
-        using ArgToTuple_t = const typename ArgToTuple<std::decay_t<Type>>::Type;
+        using ArgToTuple_t = const typename ArgToTuple<::std::decay_t<Type>>::Type;
 
         template<typename... Args>
-        using ArgsToTuple = std::tuple<ArgToTuple_t<Args>...>;
+        using ArgsToTuple = ::std::tuple<ArgToTuple_t<Args>...>;
 
         template<typename NewType, typename PA, typename... TA>
         constexpr auto Extend(TA&&... args)
         {
-            if constexpr (sizeof...(TA) < std::tuple_size<PA>())
+            if constexpr (sizeof...(TA) < ::std::tuple_size<PA>())
             {
-                return Extend<NewType, PA>(std::forward<TA>(args)..., NewType{});
+                return Extend<NewType, PA>(::std::forward<TA>(args)..., NewType{});
             }
             else
             {
-                return std::tuple<TA...>(std::forward<TA>(args)...);
+                return ::std::tuple<TA...>(::std::forward<TA>(args)...);
             }
         }
 
         template<typename NewType, typename PA, typename... Args>
-        using ExtendType = decltype(Extend<NewType, PA>(std::declval<Args>()...));
+        using ExtendType = decltype(Extend<NewType, PA>(::std::declval<Args>()...));
 
         template<typename Tup, typename... Args>
         constexpr Tup ExtendTuple(Args&&... args)
         {
-            if constexpr (sizeof...(Args) < std::tuple_size<Tup>())
+            if constexpr (sizeof...(Args) < ::std::tuple_size<Tup>())
             {
                 return ExtendTuple<Tup>(
-                    std::forward<Args>(args)..., decltype(std::get<sizeof...(Args)>(std::declval<Tup>())){});
+                    ::std::forward<Args>(args)..., decltype(::std::get<sizeof...(Args)>(::std::declval<Tup>())){});
             }
             else
             {
-                return Tup{ std::forward<Args>(args)... };
+                return Tup{ ::std::forward<Args>(args)... };
             }
         }
         template<typename Signature>
@@ -146,7 +147,7 @@ namespace tbd
         using GetTuple_t = GetTuple<Lambda>::Type;
 
         template<typename Lambda, typename... Args>
-        using SelType = ExtendType<Any_t, GetTuple_t<Lambda>, const std::decay_t<Args>...>;
+        using SelType = ExtendType<Any_t, GetTuple_t<Lambda>, const ::std::decay_t<Args>...>;
     } // namespace helpers
 
     class PubSub
@@ -154,79 +155,86 @@ namespace tbd
     public:
         class Linker;
         class Data;
+        class ElementBase;
 
-        class ElementBase
+        class ElementBaseCompare
         {
-            std::weak_ptr<Linker> linker_{};
-
         public:
-            void SetLinker(std::weak_ptr<Linker> linker) { linker_ = linker; }
-            std::weak_ptr<Linker> GetLinker() { return linker_; }
-            virtual ~ElementBase(){};
-            virtual void* GetFunc() = 0;
-            virtual void Execute(const void* args) = 0;
-            virtual bool LessThan(const ElementBase* candidate) const = 0;
-            virtual bool LessThan(const void* candidate) const = 0;
-            virtual bool GreaterThan(const void* candidate) const = 0;
-            virtual std::unique_ptr<ElementBase> MakeUnique() = 0;
-
-            // virtual std::type_index ReturnType() const = 0;
-            virtual std::type_index ArgumentType() const = 0;
-            virtual std::type_index SelectArgs() const = 0;
-
-            class Compare
-            {
-            public:
-                using is_transparent = void;
-                bool operator()(const std::unique_ptr<ElementBase>& lhs, const std::unique_ptr<ElementBase>& rhs) const
-                {
-                    return lhs->LessThan(rhs.get());
-                }
-                template<typename... Args>
-                bool operator()(const std::unique_ptr<ElementBase>& lhs, const std::tuple<Args...>& rhs) const
-                {
-                    return lhs->LessThan(static_cast<const void*>(&rhs));
-                }
-                template<typename... Args>
-                bool operator()(const std::tuple<Args...>& lhs, const std::unique_ptr<ElementBase>& rhs) const
-                {
-                    return rhs->GreaterThan(static_cast<const void*>(&lhs));
-                }
-            };
+            using is_transparent = void;
+            bool operator()(const ::std::unique_ptr<ElementBase>& lhs, const ::std::unique_ptr<ElementBase>& rhs) const;
+            template<typename... Args>
+            bool operator()(const ::std::unique_ptr<ElementBase>& lhs, const ::std::tuple<Args...>& rhs) const;
+            template<typename... Args>
+            bool operator()(const ::std::tuple<Args...>& lhs, const ::std::unique_ptr<ElementBase>& rhs) const;
         };
 
         /// @brief Elements with the same SelectType share the same set
-        using GroupSelector = std::multiset<std::unique_ptr<ElementBase>, ElementBase::Compare>;
-        using ActiveThreads_t = std::unordered_set<std::thread::id>;
-        using PerPrototype = std::unordered_map<std::type_index, GroupSelector>;
-        using Database_t = std::unordered_map<std::type_index, PerPrototype>;
+        using GroupSelector = ::std::multiset<::std::unique_ptr<ElementBase>, ElementBaseCompare>;
+        using ActiveThreads_t = ::std::unordered_set<::std::thread::id>;
+        using PerPrototype = ::std::unordered_map<::std::type_index, GroupSelector>;
+        using Database_t = ::std::unordered_map<::std::type_index, PerPrototype>;
+
+        class ElementBase
+        {
+            ::std::weak_ptr<Linker> linker_{};
+            GroupSelector::iterator next_{};
+            GroupSelector* selectors_{};
+
+            friend class Linker;
+            friend class Data;
+
+        public:
+            ::std::weak_ptr<Linker> GetLinker() { return linker_; }
+            virtual ~ElementBase(){};
+            virtual void* GetFunc() = 0;
+            virtual void Execute(const void* args) = 0;
+            virtual ::std::weak_ordering Compare(const ElementBase* candidate) const = 0;
+            virtual ::std::weak_ordering Compare(const void* candidate) const = 0;
+            virtual ::std::unique_ptr<ElementBase> MakeUnique() = 0;
+
+            // virtual std::type_index ReturnType() const = 0;
+            virtual ::std::type_index ArgumentType() const = 0;
+            virtual ::std::type_index SelectArgs() const = 0;
+
+        };
 
         class Linker
         {
-            std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries_{};
-            std::mutex activeLock_{};
-            std::shared_mutex sharedLock_{};
+            ::std::deque<::std::pair<GroupSelector*, GroupSelector::iterator>> entries_{};
+            ::std::mutex activeLock_{};
+            ::std::shared_mutex sharedLock_{};
             ActiveThreads_t active_{};
-            std::thread::id activeSolo_{};
-            std::weak_ptr<Data> data_{};
+            ::std::thread::id activeSolo_{};
+            ::std::weak_ptr<Data> data_{};
+            ElementBase* mostRecent_{};
 
         public:
-            Linker(std::weak_ptr<Data> data) : data_{ std::move(data) } {}
+            Linker(::std::weak_ptr<Data> data) : data_{ ::std::move(data) } {}
             ~Linker() { Destroy(); }
             Linker(Linker&&) = delete;
 
-            void Remember(GroupSelector& selectors, GroupSelector::iterator it)
+            static void Remember(::std::shared_ptr<Linker> self, GroupSelector& selectors, GroupSelector::iterator it)
             {
-                entries_.emplace_back(&selectors, it);
+                auto previous = ::std::exchange(self->mostRecent_, it->get());
+                GroupSelector::iterator next{ previous ? ::std::exchange(previous->next_, it) : it};
+                ElementBase& element = **it;
+                element.next_ = next;
+                element.linker_ = self;
+                element.selectors_ = &selectors;
             }
-            explicit operator bool() const { return !entries_.empty(); }
+            explicit operator bool() const { return mostRecent_; }
             size_t size() const { return entries_.size(); }
-            std::weak_ptr<Data> GetData() { return data_; }
+            ::std::weak_ptr<Data> GetData() { return data_; }
             void Destroy()
             {
+                auto last = ::std::exchange(mostRecent_, nullptr);
+                if (!last)
                 {
-                    std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
-                    const auto thisThread = std::this_thread::get_id();
+                    return;
+                }
+                {
+                    ::std::scoped_lock<::std::mutex> activeGuard{ activeLock_ };
+                    const auto thisThread = ::std::this_thread::get_id();
                     if (active_.empty())
                     {
                         if (activeSolo_ == thisThread)
@@ -244,25 +252,20 @@ namespace tbd
                         }
                     }
                 }
-                decltype(entries_) entries{ entries_};
-                {
-                    std::scoped_lock<std::shared_mutex> guard{ sharedLock_ };
-                    entries = std::move(entries_);
-                }
-
+                ::std::scoped_lock<::std::shared_mutex> guard{ sharedLock_ };
                 if (auto data = data_.lock())
                 {
-                    data->ReleaseNodes(std::move(entries));
+                    data->ReleaseNodes(*last);
                 }
             }
             bool Mark()
             {
                 {
-                    const auto thisThread = std::this_thread::get_id();
-                    std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
+                    const auto thisThread = ::std::this_thread::get_id();
+                    ::std::scoped_lock<::std::mutex> activeGuard{ activeLock_ };
                     if (active_.empty())
                     {
-                        if (activeSolo_ == std::thread::id{})
+                        if (activeSolo_ == ::std::thread::id{})
                         {
                             activeSolo_ = thisThread;
                         }
@@ -293,16 +296,16 @@ namespace tbd
             void Unmark()
             {
                 {
-                    std::scoped_lock<std::mutex> activeGuard{ activeLock_ };
+                    ::std::scoped_lock<::std::mutex> activeGuard{ activeLock_ };
                     if (active_.empty())
                     {
-                        if (activeSolo_ != std::this_thread::get_id())
+                        if (activeSolo_ != ::std::this_thread::get_id())
                         {
                             return;
                         }
                         activeSolo_ = {};
                     }
-                    else if (active_.erase(std::this_thread::get_id()) == 0)
+                    else if (active_.erase(::std::this_thread::get_id()) == 0)
                     {
                         return;
                     }
@@ -312,11 +315,11 @@ namespace tbd
 
             class Guard
             {
-                std::weak_ptr<Linker> linker_{};
+                ::std::weak_ptr<Linker> linker_{};
                 bool claimed_{};
 
             public:
-                Guard(std::shared_ptr<Linker> linker) : linker_{ linker }, claimed_{ linker->Mark() } {}
+                Guard(::std::shared_ptr<Linker> linker) : linker_{ linker }, claimed_{ linker->Mark() } {}
 
                 ~Guard()
                 {
@@ -329,7 +332,7 @@ namespace tbd
                     }
                 }
             };
-            static Guard Protect(std::shared_ptr<Linker> linker) { return Guard{ std::move(linker) }; }
+            static Guard Protect(::std::shared_ptr<Linker> linker) { return Guard{ ::std::move(linker) }; }
         };
 
         template <class Type>
@@ -339,7 +342,7 @@ namespace tbd
             union
             {
                 Type short_[1];
-                std::deque<Type> long_;
+                ::std::deque<Type> long_;
             };
             using Short = decltype(short_);
             using Long = decltype(long_);
@@ -354,13 +357,13 @@ namespace tbd
                 {
                     for (size_t i = 0 ; i < size_ ; ++i)
                     {
-                        new (&short_[i]) Type {std::move(donor.short_[i])};
+                        new (&short_[i]) Type {::std::move(donor.short_[i])};
                         donor.short_[i].~Type();
                     }
                 }
                 else
                 {
-                    new (&long_) Long{std::move(donor.long_)};
+                    new (&long_) Long{::std::move(donor.long_)};
                     donor.long_.~Long();
                 }
             }
@@ -382,23 +385,23 @@ namespace tbd
             {
                 if (size_ < maxShort)
                 {
-                    new (&short_[size_++]) Type{ std::move(t) };
+                    new (&short_[size_++]) Type{ ::std::move(t) };
                 }
                 else if (size_ == maxShort)
                 {
                     ++size_;
-                    std::deque<Type> d{};
+                    ::std::deque<Type> d{};
                     for (auto& x : short_)
                     {
-                        d.push_back(std::move(x));
+                        d.push_back(::std::move(x));
                         x.~Type();
                     }
-                    d.push_back(std::move(t));
-                    new (&long_) Long{ std::move(d) };
+                    d.push_back(::std::move(t));
+                    new (&long_) Long{ ::std::move(d) };
                 }
                 else {
                     ++size_;
-                    long_.push_back(std::move(t));
+                    long_.push_back(::std::move(t));
                 }
             }
             class const_iterator
@@ -406,7 +409,7 @@ namespace tbd
                 friend class MatchResults;
                 using ItShort = const Type*;
                 using ItLong = typename MatchResults::Long::const_iterator;
-                using ItType = std::variant<ItShort, ItLong>;
+                using ItType = ::std::variant<ItShort, ItLong>;
 
                 ItType iterator_{ItShort{}};
 
@@ -418,29 +421,29 @@ namespace tbd
                 // clang-format on
                 const_iterator& operator++()
                 {
-                    std::visit([](auto&& it) { ++it; }, iterator_);
+                    ::std::visit([](auto&& it) { ++it; }, iterator_);
                     return *this;
                 }
                 const Type& operator*() const
                 {
                     // return std::visit([](auto&& it) { return *it; }, iterator_);
-                    if (std::holds_alternative<ItShort>(iterator_))
+                    if (::std::holds_alternative<ItShort>(iterator_))
                     {
-                        return *std::get<ItShort>(iterator_);
+                        return *::std::get<ItShort>(iterator_);
                     }
                     else
                     {
-                        return *std::get<ItLong>(iterator_);
+                        return *::std::get<ItLong>(iterator_);
                     }
                 }
             };
             const_iterator begin() const {
                 using ItType = const_iterator::ItType;
-                return const_iterator{size_ <= maxShort ? ItType{std::begin(short_)} : ItType{std::begin(long_)}};
+                return const_iterator{size_ <= maxShort ? ItType{::std::begin(short_)} : ItType{::std::begin(long_)}};
             }
             const_iterator end() const {
                 using ItType = const_iterator::ItType;
-                return const_iterator{size_ <= maxShort ? ItType{std::begin(short_) + size_} : ItType{std::end(long_)}};
+                return const_iterator{size_ <= maxShort ? ItType{::std::begin(short_) + size_} : ItType{::std::end(long_)}};
             }
         };
 
@@ -458,11 +461,11 @@ namespace tbd
 
         class Term
         {
-            std::weak_ptr<Linker> linker_{};
+            ::std::weak_ptr<Linker> linker_{};
 
         public:
             Term() = default;
-            Term(std::weak_ptr<Linker> linker) : linker_{ std::move(linker) } {}
+            Term(::std::weak_ptr<Linker> linker) : linker_{ ::std::move(linker) } {}
 
             void Terminate() const
             {
@@ -476,21 +479,21 @@ namespace tbd
         class Anchor
         {
         protected:
-            std::shared_ptr<Linker> linker_{};
+            ::std::shared_ptr<Linker> linker_{};
 
         public:
             Anchor() = default;
-            explicit Anchor(std::shared_ptr<Linker> linker) : linker_{ std::move(linker) } {}
+            explicit Anchor(::std::shared_ptr<Linker> linker) : linker_{ ::std::move(linker) } {}
             virtual ~Anchor()
             {
-                if (auto linker = std::move(linker_))
+                if (auto linker = ::std::move(linker_))
                 {
                     linker->Destroy();
                 }
             }
-            Anchor& operator=(std::nullptr_t)
+            Anchor& operator=(::std::nullptr_t)
             {
-                auto tmp = std::move(*this);
+                auto tmp = ::std::move(*this);
                 return *this;
             }
             Anchor(Anchor&&) = default;
@@ -504,8 +507,8 @@ namespace tbd
             template<typename Func, typename... Args>
             [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
             {
-                Add(std::move(func), std::forward<Args>(args)...);
-                return Anchor{ std::move(linker_) };
+                Add(::std::move(func), ::std::forward<Args>(args)...);
+                return Anchor{ ::std::move(linker_) };
             }
 
             template<typename Func, typename... Args>
@@ -513,15 +516,15 @@ namespace tbd
             {
                 if (!linker_)
                 {
-                    throw std::runtime_error{ "Invalid anchor" };
+                    throw ::std::runtime_error{ "Invalid anchor" };
                 }
 
                 if (auto data = linker_->GetData().lock())
                 {
-                    auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
-                        std::move(func), std::forward<Args>(args)...);
+                    auto sel = ::std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
+                        ::std::move(func), ::std::forward<Args>(args)...);
 
-                    data->AddElement(linker_, std::move(sel));
+                    data->AddElement(linker_, ::std::move(sel));
                 }
 
                 return *this;
@@ -532,47 +535,42 @@ namespace tbd
         class Select : public ElementBase
         {
             using TupleType = helpers::GetTuple_t<Func>;
-            static inline constexpr std::size_t CallArgCount = std::tuple_size<TupleType>();
+            static inline constexpr ::std::size_t CallArgCount = ::std::tuple_size<TupleType>();
 
             SelectType sel_; // the select type is a common size, the func is not.
             Func func_;
 
         public:
-            bool LessThan(const void* candidate) const override
+            ::std::weak_ordering Compare(const void* candidate) const override
             {
                 auto rhs = static_cast<const TupleType*>(candidate);
-                return sel_ < *rhs;
+                return sel_ <=> *rhs;
             }
-            bool GreaterThan(const void* candidate) const override
-            {
-                auto rhs = static_cast<const TupleType*>(candidate);
-                return sel_ > *rhs;
-            }
-            bool LessThan(const ElementBase* candidate) const override
+            ::std::weak_ordering Compare(const ElementBase* candidate) const override
             {
                 auto rhs = static_cast<const Select*>(candidate);
-                return sel_ < rhs->sel_;
+                return sel_ <=> rhs->sel_;
             }
             void* GetFunc() override { return static_cast<void*>(&func_); }
 
             void Execute(const void* args) override
             {
                 auto& params = *static_cast<const TupleType*>(args);
-                std::apply(func_, params);
+                ::std::apply(func_, params);
             }
-            std::unique_ptr<ElementBase> MakeUnique() override
+            ::std::unique_ptr<ElementBase> MakeUnique() override
             {
-                auto result = std::make_unique<Select>(std::move(*this));
+                auto result = ::std::make_unique<Select>(::std::move(*this));
                 return result;
             }
             // std::type_index ReturnType() const override { return std::type_index{typeid(GetRet<Func>)}; }
-            std::type_index ArgumentType() const override { return std::type_index{ typeid(TupleType) }; }
-            std::type_index SelectArgs() const override { return std::type_index{ typeid(SelectType) }; }
+            ::std::type_index ArgumentType() const override { return ::std::type_index{ typeid(TupleType) }; }
+            ::std::type_index SelectArgs() const override { return ::std::type_index{ typeid(SelectType) }; }
 
             template<typename Lambda, typename... Args>
             explicit Select(Lambda&& func, Args&&... args) :
-                sel_{ helpers::ExtendTuple<helpers::SelType<Lambda, Args...>>(std::forward<Args>(args)...) },
-                func_{ std::move(func) }
+                sel_{ helpers::ExtendTuple<helpers::SelType<Lambda, Args...>>(::std::forward<Args>(args)...) },
+                func_{ ::std::move(func) }
             {
             }
         };
@@ -593,27 +591,26 @@ namespace tbd
         class Data
         {
             Database_t database_{};
-            std::shared_mutex lock_{};
-            std::ostream* debugStream_{};
+            ::std::shared_mutex lock_{};
+            ::std::ostream* debugStream_{};
             bool removeEmptySets_{false};
 
-            using ScopedLock = std::scoped_lock<std::shared_mutex>;
+            using ScopedLock = ::std::scoped_lock<::std::shared_mutex>;
 
         public:
             Data() {}
-            explicit Data(std::ostream& debugStream) : debugStream_{ &debugStream } {}
+            explicit Data(::std::ostream& debugStream) : debugStream_{ &debugStream } {}
             explicit Data(PubSub::RemoveEmptySets) : removeEmptySets_{true} {}
             ScopedLock GetLock() { return ScopedLock{ lock_ }; }
 
-            void AddElement(std::shared_ptr<Linker>& linker, std::unique_ptr<ElementBase> base)
+            void AddElement(::std::shared_ptr<Linker>& linker, ::std::unique_ptr<ElementBase> base)
             {
                 ScopedLock guard{ lock_ };
                 auto argType = base->ArgumentType();
                 auto& perPrototype = database_[base->ArgumentType()];
                 auto& selectorSet = perPrototype[base->SelectArgs()];
-                auto it = selectorSet.insert(std::move(base));
-                linker->Remember(selectorSet, it);
-                (*it)->SetLinker(linker);
+                auto it = selectorSet.insert(::std::move(base));
+                Linker::Remember(linker, selectorSet, it);
                 if (debugStream_)
                 {
                     *debugStream_ << "added : " << Demangle(argType) << "\n";
@@ -621,11 +618,11 @@ namespace tbd
             }
 
             template<typename Type>
-            MatchResults<std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
+            MatchResults<::std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
             {
-                MatchResults<std::weak_ptr<ElementBase>> winners{};
-                SharedGuard<std::shared_mutex> guard{ lock_ };
-                if (auto perPrototypeIt = database_.find(std::type_index{ typeid(decltype(argTuple)) });
+                MatchResults<::std::weak_ptr<ElementBase>> winners{};
+                SharedGuard<::std::shared_mutex> guard{ lock_ };
+                if (auto perPrototypeIt = database_.find(::std::type_index{ typeid(decltype(argTuple)) });
                     perPrototypeIt != database_.end())
                 {
                     PerPrototype& perPrototype = perPrototypeIt->second;
@@ -635,10 +632,9 @@ namespace tbd
                         for (; first != last; ++first)
                         {
                             ElementBase* element = first->get();
-                            auto weak = element->GetLinker();
                             if (auto linker = element->GetLinker().lock())
                             {
-                                winners.push_back(std::shared_ptr<ElementBase>{ linker, element });
+                                winners.push_back(::std::shared_ptr<ElementBase>{ linker, element });
                             }
                         }
                     }
@@ -650,20 +646,32 @@ namespace tbd
                 return winners;
             }
 
-            void ReleaseNodes(std::deque<std::pair<GroupSelector*, GroupSelector::iterator>> entries)
+            void ReleaseNodes(ElementBase& first)
             {
-                std::vector<GroupSelector::node_type> nodes{};
-                nodes.reserve(entries.size());
-                ScopedLock guard{ lock_ };
-                bool removeEmpty{false};
-                for (auto [selectors, it] : entries)
+                bool removeEmpty{ false };
+                ::std::set<::std::unique_ptr<ElementBase>> nodes{};
                 {
-                    nodes.emplace_back(selectors->extract(it));
-                    if (selectors->empty())
+                    ScopedLock guard{ lock_ };
+                    auto it = first.next_;
+                    for (;;)
                     {
-                        removeEmpty = true;
+                        auto& element = **it;
+                        auto& selectors = element.selectors_;
+                        auto next = element.next_;
+                        nodes.insert(selectors->extract(it));
+                        if (selectors->empty())
+                        {
+                            removeEmpty = true;
+                        }
+                        if (&element == &first)
+                        {
+                            break;
+                        }
+                        it = next;
                     }
                 }
+                nodes.clear();
+
                 if (removeEmpty && removeEmptySets_)
                 {
                     for (auto ppIt = database_.begin(); ppIt != database_.end();
@@ -675,13 +683,12 @@ namespace tbd
                         }
                     }
                 }
-                // nodes are destroyed after lock released
             }
         };
 
         PubSub() = default;
-        explicit PubSub(RemoveEmptySets arg) : data_{ std::make_shared<Data>(arg) } {}
-        explicit PubSub(std::ostream& debugStream) : data_{ std::make_shared<Data>(debugStream) } {}
+        explicit PubSub(RemoveEmptySets arg) : data_{ ::std::make_shared<Data>(arg) } {}
+        explicit PubSub(::std::ostream& debugStream) : data_{ ::std::make_shared<Data>(debugStream) } {}
 
         template<typename... Args>
         void Publish(Args&&... args) const
@@ -705,32 +712,53 @@ namespace tbd
         template<typename... Args>
         void operator()(Args&&... args) const
         {
-            Publish(std::forward<Args>(args)...);
+            Publish(::std::forward<Args>(args)...);
         }
 
         template<typename Func, typename... Args>
         [[nodiscard]] Anchor Subscribe(Func func, Args&&... args)
         {
-            auto linker = std::make_shared<Linker>(data_);
+            auto linker = ::std::make_shared<Linker>(data_);
 
-            auto sel = std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
-                std::move(func), std::forward<Args>(args)...);
+            auto sel = ::std::make_unique<Select<Func, helpers::SelType<Func, Args...>>>(
+                ::std::move(func), ::std::forward<Args>(args)...);
 
-            data_->AddElement(linker, std::move(sel));
+            data_->AddElement(linker, ::std::move(sel));
 
-            return Anchor{ std::move(linker) };
+            return Anchor{ ::std::move(linker) };
         }
 
-        [[nodiscard]] Anchor MakeAnchor() { return Anchor{ std::make_shared<Linker>(data_) }; }
+        [[nodiscard]] Anchor MakeAnchor() { return Anchor{ ::std::make_shared<Linker>(data_) }; }
 
         /** @brief Return a container in which to drop anchors
          * @return an empty container for anchors
          */
-        static std::deque<Anchor> MakeAnchorage() { return std::deque<Anchor>{}; }
+        static ::std::deque<Anchor> MakeAnchorage() { return ::std::deque<Anchor>{}; }
 
     private:
-        std::shared_ptr<Data> data_{ std::make_shared<Data>() };
+        ::std::shared_ptr<Data> data_{ ::std::make_shared<Data>() };
     };
+
+    inline bool PubSub::ElementBaseCompare::operator()(
+        const ::std::unique_ptr<ElementBase>& lhs,
+        const ::std::unique_ptr<ElementBase>& rhs) const
+    {
+        return lhs->Compare(rhs.get()) == ::std::partial_ordering::less;
+    }
+    template<typename... Args>
+    bool PubSub::ElementBaseCompare::operator()(
+        const ::std::unique_ptr<ElementBase>& lhs,
+        const ::std::tuple<Args...>& rhs) const
+    {
+        return lhs->Compare(static_cast<const void*>(&rhs)) == ::std::partial_ordering::less;
+    }
+    template<typename... Args>
+    bool PubSub::ElementBaseCompare::operator()(
+        const ::std::tuple<Args...>& lhs,
+        const ::std::unique_ptr<ElementBase>& rhs) const
+    {
+        return rhs->Compare(static_cast<const void*>(&lhs)) == ::std::partial_ordering::greater;
+    }
 
     constexpr PubSub::RemoveEmptySets removeEmptySets{};
 
@@ -740,7 +768,7 @@ namespace tbd
         Type value_{};
 
     public:
-        explicit LE(Type value) : value_{ std::move(value) } {}
+        explicit LE(Type value) : value_{ ::std::move(value) } {}
         ~LE() = default;
         LE() = default;
         LE(LE&&) = default;
@@ -769,7 +797,7 @@ namespace tbd
         Type value_{};
 
     public:
-        explicit LT(Type value) : value_{ std::move(value) } {}
+        explicit LT(Type value) : value_{ ::std::move(value) } {}
         ~LT() = default;
         LT() = default;
         LT(LT&&) = default;
@@ -798,7 +826,7 @@ namespace tbd
         Type value_{};
 
     public:
-        explicit GE(Type value) : value_{ std::move(value) } {}
+        explicit GE(Type value) : value_{ ::std::move(value) } {}
         GE() = default;
         ~GE() = default;
         GE(GE&&) = default;
@@ -826,7 +854,7 @@ namespace tbd
         Type value_{};
 
     public:
-        explicit GT(Type value) : value_{ std::move(value) } {}
+        explicit GT(Type value) : value_{ ::std::move(value) } {}
         GT() = default;
         ~GT() = default;
         GT(GT&&) = default;
@@ -866,7 +894,7 @@ namespace tbd
             template<Streamable Stream>
             friend Stream& operator<<(Stream& stream, const AsOct& o)
             {
-                auto flags = stream.flags(std::ios::oct | (stream.flags() & (~std::ios::basefield)));
+                auto flags = stream.flags(::std::ios::oct | (stream.flags() & (~::std::ios::basefield)));
                 stream << "0" << o.v;
                 stream.flags(flags);
                 return stream;
@@ -879,7 +907,7 @@ namespace tbd
         template<class Stream>
             requires requires(Stream& s) {
                 typename Stream::char_type;
-                { s << "" } -> std::same_as<Stream&>;
+                { s << "" } -> ::std::same_as<Stream&>;
             }
         friend Stream& operator<<(Stream& stream, const BitSelect& b)
         {
