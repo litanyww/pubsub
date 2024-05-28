@@ -165,7 +165,7 @@ tbd::PubSub::Anchor processStarted(tbd::PubSub& pubsub, pid_t pid)
 
 TEST(EventAnalysis, Example)
 {
-    tbd::PubSub pubsub{};
+    tbd::PubSub pubsub{tbd::removeEmptySets};
     auto susRule = pubsub.MakeAnchor();
 
     susRule.Add(

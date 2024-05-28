@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <deque>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -22,10 +23,11 @@
 
 namespace tbd
 {
-    template<class Stream>
+    template<typename Stream>
     concept Streamable = requires(Stream& s) {
         typename Stream::char_type;
-        { s << "" } -> ::std::same_as<Stream&>;
+        { s << 0 };
+        { s << ::std::setw(1)};
     };
 
     /** @brief class which always matches anything */
@@ -578,6 +580,13 @@ namespace tbd
         template<typename Lambda, typename... Args>
         Select(Lambda f, Args&&... a) -> Select<Lambda, helpers::SelType<Lambda, Args...>>;
 
+        static inline std::string ShowTupleArgs(std::type_index id)
+        {
+            std::string tup = Demangle(id).ToString();
+            return tup.substr(11, tup.size() - 12);
+        }
+
+
         /// @brief Each prototype checks all GroupSelectors, but we need to index them to insert quickly
 
         /** Tag for PubSub constructor to force it to remove empty elements from
@@ -735,6 +744,21 @@ namespace tbd
                 }
                 return linkers.size();
             }
+
+            template <Streamable Stream>
+            void Output(Stream& stream) const
+            {
+                ScopedLock guard{ lock_ };
+                for (const auto& i : database_)
+                {
+                    stream << "\n  " << ShowTupleArgs(i.first);
+                    for (const auto& x : i.second)
+                    {
+                        stream << "\n" << std::setw(6) << x.second.size() << ": " << ShowTupleArgs(x.first);
+                    }
+                }
+            }
+
         };
 
         size_t CallTypes() const
@@ -822,6 +846,22 @@ namespace tbd
          * @return an empty container for anchors
          */
         static ::std::deque<Anchor> MakeAnchorage() { return ::std::deque<Anchor>{}; }
+
+        template<Streamable Stream>
+        friend Stream& operator<<(Stream& stream, const PubSub& p)
+        {
+            stream << "[Pubsub ";
+            if (p.data_)
+            {
+                p.data_->Output(stream);
+                stream << "\n]";
+            }
+            else
+            {
+                stream << "]";
+            }
+            return stream;
+        }
 
     private:
         ::std::shared_ptr<Data> data_{ ::std::make_shared<Data>() };

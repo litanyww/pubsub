@@ -7,6 +7,7 @@
 #include <future>
 #include <iostream>
 #include <latch>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <typeindex>
@@ -130,6 +131,10 @@ TEST(PubSub, BasicTest)
     ASSERT_EQ(3, pubsub.SelectorCount());
     ASSERT_EQ(5, pubsub.SubscriptionCount());
     ASSERT_EQ(5, pubsub.AnchorCount());
+
+    std::ostringstream ost;
+    ost << pubsub;
+    // std::cerr << " XXX " << ost.str() << "\n";
 
     pubsub.Publish(41);
     pubsub.Publish(42);
