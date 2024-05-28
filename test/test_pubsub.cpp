@@ -126,6 +126,11 @@ TEST(PubSub, BasicTest)
         tbd::any,
         69);
 
+    ASSERT_EQ(2, pubsub.CallTypes());
+    ASSERT_EQ(3, pubsub.SelectorCount());
+    ASSERT_EQ(5, pubsub.SubscriptionCount());
+    ASSERT_EQ(5, pubsub.AnchorCount());
+
     pubsub.Publish(41);
     pubsub.Publish(42);
     pubsub.Publish(43);

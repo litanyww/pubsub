@@ -34,4 +34,20 @@ public:
 #endif
         return stream;
     }
+
+    std::string ToString() const
+    {
+#ifdef __GNUG__
+        size_t len{};
+        int status{};
+        std::unique_ptr<char, void (*)(void*)> text{ abi::__cxa_demangle(name, nullptr, &len, &status), std::free };
+        if (status == 0)
+        {
+            return text.get();
+        }
+        return name;
+#else
+        return name;
+#endif
+    }
 };

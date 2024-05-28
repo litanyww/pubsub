@@ -184,7 +184,7 @@ namespace tbd
             friend class Data;
 
         public:
-            ::std::weak_ptr<Linker> GetLinker() { return linker_; }
+            ::std::weak_ptr<Linker> GetLinker() const { return linker_; }
             virtual ~ElementBase(){};
             virtual void* GetFunc() = 0;
             virtual void Execute(const void* args) = 0;
@@ -591,7 +591,7 @@ namespace tbd
         class Data
         {
             Database_t database_{};
-            ::std::shared_mutex lock_{};
+            mutable ::std::shared_mutex lock_{};
             ::std::ostream* debugStream_{};
             bool removeEmptySets_{false};
 
@@ -618,14 +618,14 @@ namespace tbd
             }
 
             template<typename Type>
-            MatchResults<::std::weak_ptr<ElementBase>> GetMatches(Type argTuple)
+            MatchResults<::std::weak_ptr<ElementBase>> GetMatches(Type argTuple) const
             {
                 MatchResults<::std::weak_ptr<ElementBase>> winners{};
                 SharedGuard<::std::shared_mutex> guard{ lock_ };
                 if (auto perPrototypeIt = database_.find(::std::type_index{ typeid(decltype(argTuple)) });
                     perPrototypeIt != database_.end())
                 {
-                    PerPrototype& perPrototype = perPrototypeIt->second;
+                    const PerPrototype& perPrototype = perPrototypeIt->second;
                     for (auto& [type, selectors] : perPrototype)
                     {
                         auto [first, last] = selectors.equal_range(argTuple);
@@ -684,7 +684,95 @@ namespace tbd
                     }
                 }
             }
+
+            size_t CallTypes() const {
+                ScopedLock guard{ lock_ };
+                return database_.size();
+            }
+            size_t SelectorCount() const
+            {
+                ScopedLock guard{ lock_ };
+                size_t result{};
+                for (const auto& p : database_)
+                {
+                    result += p.second.size();
+                }
+                return result;
+            }
+            size_t SubscriptionCount() const
+            {
+                ScopedLock guard{ lock_ };
+                size_t result{};
+                for (const auto& p : database_)
+                {
+                    for (const auto& s : p.second)
+                    {
+                        result += s.second.size();
+                    }
+                }
+                return result;
+            }
+            size_t AnchorCount() const
+            {
+                struct Comp
+                {
+                    bool operator()(const std::weak_ptr<Linker>& lhs, const std::weak_ptr<Linker>& rhs) const
+                    {
+                        return lhs.owner_before(rhs);
+                    }
+                };
+                std::set<std::weak_ptr<Linker>, Comp> linkers{};
+                ScopedLock guard{ lock_ };
+                for (const auto& i : database_)
+                {
+                    for (const auto& x : i.second)
+                    {
+                        for (const auto& e : x.second)
+                        {
+                            linkers.insert(e->GetLinker());
+                        }
+                    }
+                }
+                return linkers.size();
+            }
         };
+
+        size_t CallTypes() const
+        {
+            if (data_)
+            {
+                return data_->CallTypes();
+            }
+            return {};
+        }
+
+        size_t SubscriptionCount() const
+        {
+            if (data_)
+            {
+                return data_->SubscriptionCount();
+            }
+            return {};
+
+        }
+
+        size_t SelectorCount() const
+        {
+            if (data_)
+            {
+                return data_->SelectorCount();
+            }
+            return {};
+        }
+
+        size_t AnchorCount() const
+        {
+            if (data_)
+            {
+                return data_->AnchorCount();
+            }
+            return {};
+        }
 
         PubSub() = default;
         explicit PubSub(RemoveEmptySets arg) : data_{ ::std::make_shared<Data>(arg) } {}
