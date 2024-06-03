@@ -480,7 +480,6 @@ namespace tbd
 
         class Anchor
         {
-        protected:
             ::std::shared_ptr<Linker> linker_{};
 
         public:
