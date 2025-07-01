@@ -2,6 +2,7 @@ all : tests
 
 CFLAGS = -Og -g
 CXXFLAGS = -I. -std=c++20
+LDFLAGS = -g
 
 SRCS = $(wildcard *.cpp)
 OBJS = $(patsubst %.cpp,%.o,$(SRCS))

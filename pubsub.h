@@ -1,6 +1,7 @@
 #pragma once
 
 #include "demangle.h"
+#include "alloc.h"
 
 #include <cstddef>
 #include <deque>
@@ -170,11 +171,41 @@ namespace tbd
             bool operator()(const ::std::tuple<Args...>& lhs, const ::std::unique_ptr<ElementBase>& rhs) const;
         };
 
+#ifdef USE_STD_ALLOCATOR
+        template<typename T>
+        using AllocType = std::allocator<T>;
+#else
+        template<typename T>
+        using AllocType = Allocator<T>;
+#endif
+
+        template<
+            typename Key,
+            typename Compare = ::std::less<Key>,
+            typename Alloc = AllocType<Key>>
+        using MultiSet = ::std::multiset<Key, Compare, Alloc>;
+
+        template<
+            typename Key,
+            typename Hash = ::std::hash<Key>,
+            typename Equal = ::std::equal_to<Key>,
+            typename Alloc = AllocType<Key>>
+        using UnorderedSet = ::std::unordered_set<Key, Hash, Equal, Alloc>;
+
+        template<
+            typename Key,
+            typename T,
+            typename Hash = ::std::hash<Key>,
+            typename Equal = ::std::equal_to<Key>,
+            typename Alloc = AllocType<std::pair<const Key, T>>>
+        using UnorderedMap = ::std::unordered_map<Key, T, Hash, Equal, Alloc>;
+
         /// @brief Elements with the same SelectType share the same set
-        using GroupSelector = ::std::multiset<::std::unique_ptr<ElementBase>, ElementBaseCompare>;
-        using ActiveThreads_t = ::std::unordered_set<::std::thread::id>;
-        using PerPrototype = ::std::unordered_map<::std::type_index, GroupSelector>;
-        using Database_t = ::std::unordered_map<::std::type_index, PerPrototype>;
+        using GroupSelector = MultiSet<::std::unique_ptr<ElementBase>, ElementBaseCompare>;
+        using ActiveThreads_t = UnorderedSet<::std::thread::id>;
+        using PerPrototype = UnorderedMap<::std::type_index, GroupSelector>;
+        using Database_t = UnorderedMap<::std::type_index, PerPrototype>;
+
 
         class ElementBase
         {
@@ -657,7 +688,7 @@ namespace tbd
             void ReleaseNodes(ElementBase& first)
             {
                 bool removeEmpty{ false };
-                ::std::set<::std::unique_ptr<ElementBase>> nodes{};
+                ::std::deque<GroupSelector::node_type> nodes{};
                 {
                     ScopedLock guard{ lock_ };
                     auto it = first.next_;
@@ -666,7 +697,7 @@ namespace tbd
                         auto& element = **it;
                         auto& selectors = element.selectors_;
                         auto next = element.next_;
-                        nodes.insert(selectors->extract(it));
+                        nodes.push_back(selectors->extract(it));
                         if (selectors->empty())
                         {
                             removeEmpty = true;
