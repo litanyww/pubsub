@@ -6,7 +6,8 @@
 
 TEST(Alloc, Pool)
 {
-    tbd::Pool<100> pool{nullptr, 32, 4};
+    tbd::Pools<100> pools{};
+    tbd::Pools<100>::Pool pool{&pools, 32UL, 4UL};
 
     std::mutex mutex{};
     std::scoped_lock<std::mutex> guard{mutex};
@@ -39,18 +40,18 @@ TEST(Alloc, AllPools)
     void* address = pools.GetPool(sizeof(int), alignof(int)).Allocate(4UL, 4UL);
     ASSERT_NE(nullptr, address);
 
-    ASSERT_EQ(1U, tbd::Pool<1024UL>::GetPool(address)->GetUseCount());
+    ASSERT_EQ(1U, tbd::Pools<1024UL>::Pool::GetPool(address)->GetUseCount());
 
     pools.GetPool(sizeof(int), alignof(int)).Free(address);
 
-    ASSERT_EQ(0U, tbd::Pool<1024UL>::GetPool(address)->GetUseCount());
+    ASSERT_EQ(0U, tbd::Pools<1024UL>::Pool::GetPool(address)->GetUseCount());
 
     void* second = pools.GetPool(sizeof(int), alignof(int)).Allocate(4UL, 4UL);
     ASSERT_EQ(second, address);
 
     void* third = pools.GetPool(sizeof(int), alignof(int)).Allocate(4UL, 4UL);
     ASSERT_NE(third, second);
-    ASSERT_EQ(2U, tbd::Pool<1024UL>::GetPool(address)->GetUseCount());
+    ASSERT_EQ(2U, tbd::Pools<1024UL>::Pool::GetPool(address)->GetUseCount());
 }
 
 TEST(Alloc, Map)

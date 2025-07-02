@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <iostream>
 #include <list>
@@ -10,144 +11,201 @@
 
 namespace tbd
 {
-    // Simple pool.
-    template<size_t Size>
-    class Pools;
-
     using MaxOffsetType = unsigned int;
+    using SizeType = decltype(sizeof(int));
+    using AlignType = decltype(alignof(int));
 
-    template<size_t Size>
-    class Pool
+    consteval std::size_t AlignedSize(SizeType allocationSize, AlignType alignment)
     {
-        struct Element
+        return (allocationSize + alignment - 1) & ~(alignment - 1);
+    }
+    constexpr std::size_t OffsetSize(std::size_t blockSize)
+    {
+        if (blockSize < 0x10000ULL)
         {
-            Element* m_next;
-        };
-        struct Header
-        {
-            Element* m_firstFree{};
-            Pools<Size>* m_pools{};
-            unsigned int m_useCount{};
-        };
-        using OffsetType = std::conditional_t<(Size - sizeof(Element) < 0x10000), unsigned short, unsigned int>;
-        struct Prefix
-        {
-            OffsetType m_offset;
-        };
-
-        Header m_header;
-        std::byte m_data[Size - sizeof(Header)];
-        static_assert(sizeof(m_data) > 0UL);
-
-        static std::byte* Align(std::byte* address, size_t alignment)
-        {
-            const auto mask = alignment - 1;
-            return reinterpret_cast<std::byte*>(reinterpret_cast<uintptr_t>(address + mask) & ~mask);
+            return 2U;
         }
-
-    public:
-        Pool(Pools<Size>* pools, size_t allocationSize, size_t alignment) : m_header{ .m_pools = pools }
+        if (blockSize < 0x1'0000'0000ULL)
         {
-            std::byte* end = std::end(m_data);
-            std::byte* ptr = Align(std::begin(m_data) + sizeof(Prefix), alignment);
-            Element** previousNext = &m_header.m_firstFree;
-
-            for (;;)
-            {
-                auto* element = reinterpret_cast<Element*>(ptr);
-                auto* next = Align(ptr + allocationSize + sizeof(Prefix), alignment);
-                if (next > end)
-                {
-                    *previousNext = nullptr;
-                    break;
-                }
-                reinterpret_cast<Prefix*>(ptr)[-1].m_offset =
-                    static_cast<OffsetType>(ptr - reinterpret_cast<std::byte*>(&m_header));
-                *previousNext = element;
-                previousNext = &element->m_next;
-                ptr = next;
-            }
+            return 4U;
         }
-        void* Allocate(const std::scoped_lock<std::mutex>&)
-        {
-            Element* element = m_header.m_firstFree;
-            if (element)
-            {
-                m_header.m_firstFree = element->m_next;
-                ++m_header.m_useCount;
-            }
-            return element;
-        }
+        return 8U;
+    }
 
-        static void Free(const std::scoped_lock<std::mutex>&, void* address)
-        {
-            auto element = reinterpret_cast<Element*>(address);
-            auto* header = reinterpret_cast<Header*>(
-                reinterpret_cast<std::byte*>(address) - reinterpret_cast<Prefix*>(address)[-1].m_offset);
-            element->m_next = std::exchange(header->m_firstFree, element);
-            --header->m_useCount;
-        }
+    template<typename T>
+    typename std::list<T>::iterator GetListIterator(T& value)
+    {
+        typename std::list<T>::iterator result{};
+        void* null{};
+        return std::bit_cast<typename std::list<T>::iterator>(
+            std::bit_cast<std::byte*>(&value) -
+            std::bit_cast<uintptr_t>(&std::bit_cast<typename std::list<T>::iterator>(null).operator*()));
+    }
 
-        static Pool* GetPool(void* address)
-        {
-            auto offset = reinterpret_cast<Prefix*>(address)[-1].m_offset;
-            if (!offset)
-            {
-                return nullptr;
-            }
-            return reinterpret_cast<Pool*>(reinterpret_cast<std::byte*>(address) - offset);
-        }
+    inline std::byte* Align(std::byte* address, std::size_t alignment)
+    {
+        const auto mask = alignment - 1;
+        return reinterpret_cast<std::byte*>(reinterpret_cast<uintptr_t>(address + mask) & ~mask);
+    }
 
-        static Pools<Size>* GetPools(void* address)
-        {
-            auto* pool = reinterpret_cast<Pool*>(
-                reinterpret_cast<std::byte*>(address) - reinterpret_cast<Prefix*>(address)[-1].m_offset);
-            return pool->m_header.m_pools;
-        }
-
-        auto GetUseCount() const { return m_header.m_useCount; }
-        bool IsExhausted() const { return m_header.m_firstFree == nullptr; }
-    };
-
-    template<size_t Size>
+    template<std::size_t Size>
     class Pools
     {
-        using PoolType = Pool<Size>;
-        std::list<PoolType> m_pools{};
+        static inline constexpr std::size_t offsetSize = OffsetSize(Size);
+        using OffsetType = std::conditional_t<offsetSize == 2, unsigned short, std::conditional_t<offsetSize == 4, unsigned int, unsigned long long>>;
+        public: // temporary
+        class Pool
+        {
+            class Header
+            {
+                Pools* m_pools{};
+                unsigned int m_useCount{};
+                OffsetType m_firstFree{};
+
+            public:
+                Header(Pools* pools, SizeType allocationSize, AlignType alignment) : m_pools{ pools }
+                {
+                    auto* const start = reinterpret_cast<std::byte*>(this);
+                    auto* ptr = Align(start + sizeof(Header) + sizeof(OffsetType), alignment);
+                    const auto* const end = start + Size;
+                    OffsetType* previousNext = &m_firstFree;
+
+                    for (;;)
+                    {
+                        auto* next = Align(ptr + allocationSize + sizeof(OffsetType), alignment);
+                        if (next > end)
+                        {
+                            *previousNext = 0U;
+                            break;
+                        }
+                        reinterpret_cast<OffsetType*>(ptr)[-1] = ptr - start;
+                        *previousNext = ptr - start;
+                        previousNext = reinterpret_cast<OffsetType*>(ptr);
+                        ptr = next;
+                    }
+                }
+
+                bool IsExhausted() const { return m_firstFree == 0U; }
+                size_t GetUseCount() const { return m_useCount; }
+
+                void* GetFirst()
+                {
+                    if (!m_firstFree)
+                    {
+                        return nullptr;
+                    }
+
+                    ++m_useCount;
+                    auto* result = reinterpret_cast<std::byte*>(this) + m_firstFree;
+                    m_firstFree = *reinterpret_cast<OffsetType*>(result);
+                    return result;
+                }
+
+                void Return(void* address)
+                {
+                    --m_useCount;
+                    *reinterpret_cast<OffsetType*>(address) = m_firstFree;
+                    m_firstFree = reinterpret_cast<const std::byte*>(address) - reinterpret_cast<const std::byte*>(this);
+                }
+            };
+
+
+            Header m_header;
+            std::byte m_data[Size - sizeof(m_header)];
+            static_assert(sizeof(m_data) > 0UL);
+
+        public:
+            Pool(Pools* pools, std::size_t allocationSize, std::size_t alignment) :
+                m_header{ pools, allocationSize, alignment }
+            {
+            }
+            void* Allocate(const std::scoped_lock<std::mutex>&)
+            {
+                return m_header.GetFirst();
+            }
+
+            void Free(const std::scoped_lock<std::mutex>&, void* address)
+            {
+                m_header.Return(address);
+            }
+
+            static Pool* GetPool(void* address)
+            {
+                if (auto offset = reinterpret_cast<OffsetType*>(address)[-1]; offset != 0U)
+                {
+                    return reinterpret_cast<Pool*>(reinterpret_cast<std::byte*>(address) - offset);
+                }
+                return nullptr;
+            }
+
+            static Pools* GetPools(void* address)
+            {
+                auto* pool = reinterpret_cast<Pool*>(
+                    reinterpret_cast<std::byte*>(address) - reinterpret_cast<OffsetType*>(address)[-1]);
+                return reinterpret_cast<Pools*>(pool->m_header.m_pools);
+            }
+
+            auto GetUseCount() const { return m_header.GetUseCount(); }
+            bool IsExhausted() const { return m_header.IsExhausted(); }
+        };
+        std::list<Pool> m_pools{};
+        std::list<Pool> m_empty{};
         std::mutex m_mutex{};
 
     public:
-        void* Allocate(size_t allocationSize, size_t alignment)
+        void* Allocate(std::size_t allocationSize, std::size_t alignment)
         {
             std::scoped_lock<std::mutex> guard{ m_mutex };
-            for (auto& p : m_pools)
+            for (auto it = m_pools.begin(); it != m_pools.end(); ++it)
             {
-                if (void* address = p.Allocate(guard))
+                if (void* address = it->Allocate(guard))
                 {
-                    if (p.IsExhausted())
+                    if (it->IsExhausted())
                     {
-                        std::cerr << "Pool is exhausted\n";
+
+                        std::cerr << "Moving exhausted pool to end " << allocationSize << " " << alignment << "\n";
+                        m_pools.splice(m_pools.end(), m_pools, it);
                     }
                     return address;
                 }
             }
-            auto& p = m_pools.emplace_back(this, allocationSize, alignment);
+            if (!m_empty.empty())
+            {
+                auto it = m_empty.begin();
+                void* address = it->Allocate(guard);
+                m_pools.splice(m_pools.begin(), m_empty, it);
+                std::cerr << "Moving empty pool back into play " << allocationSize << " " << alignment << "\n";
+                return address;
+            }
+
+            std::cerr << "creating new pool " << allocationSize << " " << alignment << "\n";
+            auto& p = m_pools.emplace_front(this, allocationSize, alignment);
             return p.Allocate(guard);
         }
 
         bool Free(void* address)
         {
-            Pool<Size>* pool = Pool<Size>::GetPool(address);
+            Pool* pool = Pool::GetPool(address);
             if (!pool)
             {
                 return false;
             }
             std::scoped_lock<std::mutex> guard{ m_mutex };
-            bool wasExhausted = pool->IsExhausted();
-            Pool<Size>::Free(guard, address);
-            if (wasExhausted && !pool->IsExhausted())
+            pool->Free(guard, address);
+            if (pool->GetUseCount() == 0U)
             {
-                std::cerr << "Pool is no longer exhausted\n";
+                typename std::list<Pool>::iterator it = GetListIterator(*pool);
+                std::cerr << "Pool is now empty\n";
+                if (m_empty.empty())
+                {
+                    std::cerr << "putting pool into empty pool\n";
+                    m_empty.splice(m_empty.end(), m_pools, it);
+                }
+                else
+                {
+                    std::cerr << "dropping empty pool\n";
+                    m_pools.erase(it);
+                }
             }
             return true;
         }
@@ -172,12 +230,6 @@ namespace tbd
             return pools_;
         }
     };
-
-    consteval inline size_t AlignedSize(decltype(sizeof(int)) size, decltype(alignof(int)) align)
-    {
-        return (size + align - 1) & ~(align - 1);
-    }
-
 
     template<class T>
     class Allocator
@@ -209,17 +261,17 @@ namespace tbd
         Allocator& operator=(Allocator&& donor) noexcept = delete;
         ~Allocator() = default;
 
-        static inline constexpr size_t maxAllocationSize = 400U;
+        static inline constexpr std::size_t maxAllocationSize = 400U;
         [[nodiscard]] pointer allocate(std::size_t count)
         {
-            if (size_t alignSize = AlignedSize(sizeof(T), alignof(T)); alignSize < maxAllocationSize)
+            if (std::size_t alignSize = AlignedSize(sizeof(T), alignof(T)); alignSize < maxAllocationSize)
             {
                 if (count == 1U)
                 {
                     auto* p = alloc_.Allocate(sizeof(T), alignof(T));
                     return static_cast<pointer>(p);
                 }
-                else if (size_t allocationSize = alignSize * count;
+                else if (std::size_t allocationSize = alignSize * count;
                          allocationSize < maxAllocationSize &&
                          AllPools<2040U>::Instance().HasPool(allocationSize, alignof(T)))
                 {
@@ -230,14 +282,14 @@ namespace tbd
             }
 
 
-            size_t prefixSize = AlignedSize(sizeof(MaxOffsetType), alignof(T));
-            size_t rawSize = (count * sizeof(T)) + prefixSize;
+            std::size_t prefixSize = AlignedSize(sizeof(MaxOffsetType), alignof(T));
+            std::size_t rawSize = (count * sizeof(T)) + prefixSize;
             void* address = ::operator new(rawSize);
             auto* result = reinterpret_cast<std::byte*>(address) + prefixSize;
             reinterpret_cast<unsigned int*>(result)[-1] = 0UL;
             return reinterpret_cast<pointer>(result);
         }
-        pointer allocate(size_t count, pointer cvt)
+        pointer allocate(std::size_t count, pointer cvt)
         {
             return allocate(count);
         }
@@ -251,7 +303,7 @@ namespace tbd
         }
         size_type max_size()
         {
-            size_t allocationSize = ((sizeof(T) + sizeof(Pool<2048U>::Prefix) + alignof(T) - 1) & ~(alignof(T) - 1));
+            std::size_t allocationSize = ((sizeof(T) + OffsetSize(2048U) + alignof(T) - 1) & ~(alignof(T) - 1));
             return 2048U / allocationSize;
         }
     };
